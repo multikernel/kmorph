@@ -1,0 +1,311 @@
+![kmorph logo](logo.png)
+
+# kmorph: Transforming Kernels Without Reboots
+
+kmorph is crash auto-healing for multikernel Linux. A backup kernel, the
+**successor**, is armed beside the kernel running the machine, the
+**predecessor**. When the predecessor crashes, the successor fences its
+CPUs, adopts its CPUs and memory, and carries on running the machine. No
+reboot, no operator, about one second from detection to a running
+successor, and the predecessor's memory can be preserved for post-mortem
+inspection.
+
+kmorph consists of two programs and one configuration file:
+
+- **kmorph** runs on the predecessor and arms, disarms or reports on a
+  successor. It exits when done; nothing stays resident on the predecessor.
+- **kmorphd** runs inside the successor. It watches the predecessor and
+  takes over when the predecessor falls silent.
+
+kmorph is standalone. It drives the kernel's multikernel interfaces
+directly and needs no other tool.
+
+## Requirements
+
+- A multikernel Linux kernel built with `CONFIG_MULTIKERNEL=y` and
+  `CONFIG_MULTIKERNEL_VSOCKETS=y`, with the host tree interface (the
+  `multikernel,host-tree` node in instance-create). x86-64 only.
+- An initramfs for the successor that starts `kmorphd` from its init and
+  contains `getty` if the serial console is to be recovered. A static
+  build of kmorphd needs nothing else from the image.
+- On the predecessor, root, and `gzip`, `xz`, `zstd` or `lz4` if the
+  kernel image is a bzImage rather than an ELF vmlinux.
+
+## Building
+
+```bash
+make                 # build/bin/kmorph and build/bin/kmorphd
+make STATIC=1        # static binaries (musl), for the successor initramfs
+make check           # unit tests
+```
+
+The only dependencies are libc and the libfdt sources vendored under
+lib/fdt. Copy `kmorph` to the predecessor and `kmorphd` into the successor
+initramfs.
+
+## Quick start
+
+1. Write `/etc/kmorph/kmorph.conf` on the predecessor and put the same file
+   at `/etc/kmorph/kmorph.conf` in the successor initramfs:
+
+   ```ini
+   cpus    = 1
+   memory  = 128MB
+   kernel  = /boot/vmlinuz
+   initrd  = /boot/successor.img
+   cmdline = earlyprintk=serial,ttyS0,115200 keep_bootcon
+   devices = 0000:09:00.0
+   console = ttyS0
+   ```
+
+2. Have the successor initramfs start the daemon:
+
+   ```sh
+   /bin/kmorphd --config /etc/kmorph/kmorph.conf
+   ```
+
+3. Arm on the predecessor and check:
+
+   ```
+   # kmorph arm
+   kmorph: pool initialised with the successor's resources
+   kmorph: host tree: 4 CPUs, 2047 MB in 2 ranges, 24 PCI devices
+   kmorph: instance successor created with id 1
+   kmorph: successor successor armed
+   # kmorph status
+   successor: active (instance successor, id 1)
+   kmorphd: ARMED predecessor=alive last_probe=123ms error=0
+   ```
+
+From here the successor probes the predecessor five times a second. If the
+predecessor dies, the successor takes over on its own. To stand down, run
+`kmorph disarm`.
+
+## Configuration
+
+The file is `key = value`, one per line, `#` starts a comment. Both
+programs read the same file; each uses the keys for its side. `kernel`,
+`cpus` and `memory` are required to arm, everything else has a default.
+
+### Successor (used by kmorph arm)
+
+| Key | Default | Meaning |
+|---|---|---|
+| `name` | `successor` | Instance name in `/sys/fs/multikernel/instances`. |
+| `cpus` | | CPUs for the successor, as physical ids the kernel uses (APIC ids), e.g. `1` or `12-15,20`. |
+| `memory` | | Memory for the successor, e.g. `128MB`, `4GB`. |
+| `kernel` | | Kernel image: an ELF vmlinux, or a bzImage from which the vmlinux is extracted. |
+| `initrd` | | Initramfs for the successor. |
+| `cmdline` | | Kernel command line for the successor. See [Successor console](#successor-console). |
+| `devices` | | PCI functions handed to the successor, comma separated, e.g. `0000:09:00.0`. Give it its own NIC and disk. |
+| `machine_cpus` | from the MADT | Every CPU on the machine. Set only on a machine without ACPI. |
+| `console` | | Serial line the successor takes over after the crash, e.g. `ttyS0`. |
+| `console_baud` | `115200` | Speed of that line. |
+| `console_login` | | Program the getty runs instead of `login`, e.g. `/bin/sh` for an image without accounts. |
+
+### Detection and takeover (used by kmorphd)
+
+| Key | Default | Meaning |
+|---|---|---|
+| `probe_interval` | `100ms` | How often the predecessor is probed. A probe unanswered by the next one has timed out. |
+| `probe_timeouts` | `5` | Consecutive timeouts before the predecessor is declared dead. |
+| `fence_retries` | `3` | Retries of a fence that could not park every CPU. |
+| `dump` | | File to receive the predecessor's memory before it is reclaimed. Unset: reclaim at once. |
+
+The successor's probe never mistakes a slow predecessor for a dead one on
+its own evidence: a live predecessor kernel answers every probe by itself,
+with no user space involved, so only silence counts, and only for
+`probe_timeouts` probes in a row.
+
+## Operation
+
+### kmorph, on the predecessor
+
+```
+kmorph arm    [--config PATH]
+kmorph disarm [--config PATH]
+kmorph status [--config PATH]
+```
+
+**arm** prepares the machine and boots the successor. If the machine has no
+multikernel pool yet, kmorph mounts `/sys/fs/multikernel`, and creates a
+pool holding the successor's CPUs, its memory plus one memory block of
+headroom for the kernel's own use, its devices, and the serial device when
+`console` is set. If a pool exists, kmorph uses it and adds any configured
+PCI device the pool lacks. It then creates the instance, loads the kernel
+and initramfs, and boots the successor. The whole command takes about a
+second.
+
+**disarm** halts the successor, unloads its image and removes the instance,
+returning its resources to the pool.
+
+**status** prints the instance state from the kernel and, over vsock, the
+daemon's own state:
+
+```
+successor: active (instance successor, id 1)
+kmorphd: ARMED predecessor=alive last_probe=12ms error=0
+```
+
+### kmorphd, in the successor
+
+```
+kmorphd [--config PATH] [--foreground]
+```
+
+kmorphd refuses to run in a kernel that was not armed by kmorph, since it
+finds nothing to take over. It daemonises unless `--foreground` is given,
+logs to the kernel log, and writes its state to `/run/kmorph/state`:
+
+```
+TAKEN_OVER predecessor=silent last_probe=181ms error=0
+```
+
+The first word is the state, `predecessor` is the last probe result,
+`last_probe` the time since it, `error` the errno of the last failed step
+or 0. The states are ARMED, SUSPECT (one or more timeouts), FENCING,
+FENCE_FAILED, FENCED and TAKEN_OVER.
+
+## What happens at a crash
+
+1. **Detection.** Probes time out `probe_timeouts` times in a row. With the
+   defaults that is half a second.
+2. **Fence.** The successor kernel NMI-parks every CPU it does not own and
+   confirms each one parked. A CPU that never parks fails the fence, which
+   is retried on the next probe up to `fence_retries` times; the takeover
+   never proceeds with a CPU possibly still running the dead kernel.
+3. **Adoption.** The successor computes what is takeable, the machine's RAM
+   minus its own minus the kernel's control regions, and every CPU it does
+   not own, and claims it in one transaction. Fenced CPUs are woken from the
+   predecessor's park slot; memory is hot-added in whole memory blocks,
+   128 MB on x86.
+4. **Dump and reclaim.** With `dump` set, memory is left unclaimed until it
+   has been copied to the dump file through `/dev/mem`, then reclaimed. The
+   dump is a sparse file whose offsets are physical addresses. If the dump
+   fails, the memory stays unclaimed and readable rather than being
+   destroyed.
+5. **Console.** With `console` set, a getty is started on the serial line.
+
+Takeover is one-shot. Afterwards the successor is the machine's kernel and
+is itself unprotected until an operator arms a new successor.
+
+### What the successor ends up with
+
+Every CPU, and all memory that forms whole memory blocks. Blocks that
+contain the first megabyte, the top of RAM, the successor's own memory or
+one of the kernel's control regions cannot be hot-added and stay unclaimed;
+on a 2 GB machine that is about 500 MB, on a large machine a fixed few
+hundred megabytes. Unclaimed memory remains readable through `/dev/mem`.
+
+The successor keeps the devices it was armed with. Devices that belonged to
+the predecessor are not adopted, so the successor needs its own NIC and
+disk from the start.
+
+## Successor console
+
+When `console` names a serial line, `kmorph arm` places the legacy serial
+device in the pool and hands it to the successor, whose kernel registers it
+at boot. After the takeover kmorphd switches the line to polling, since the
+successor has no interrupt routing for it, and keeps a getty on it, so the
+serial console that showed the predecessor now shows the successor's shell.
+Set `console_login` to `/bin/sh` on an image without user accounts.
+
+Give the successor an early serial console on the same line in its
+`cmdline`, `earlyprintk=serial,ttyS0,115200 keep_bootcon`, so its kernel
+messages reach the serial console before and after the takeover. Do not
+use `console=mktty0`: that console forwards messages to the predecessor
+and, once the predecessor is dead, floods the successor with its own
+failure reports.
+
+On the serial console the whole event is one continuous stream: the
+predecessor's messages, the successor's boot lines interleaved once armed,
+the panic, the takeover, and the successor's login prompt.
+
+## Limitations
+
+- Exactly two kernels: one predecessor, one successor.
+- No automatic re-arming after a takeover.
+- No device takeover; the successor runs on the devices it was armed with.
+- Memory is adopted in whole 128 MB blocks; the remainder stays unclaimed.
+- The dump is a raw memory image, not a crash-tool format.
+- `kmorph upgrade`, a planned takeover for a zero-downtime kernel upgrade,
+  is not implemented.
+
+## How it works
+
+Everything novel is in the kernel. kmorph is orchestration over the
+kernel's multikernel interfaces: the `/sys/fs/multikernel` filesystem for
+the pool and instances, `kexec_file_load()` and `reboot()` to load, boot,
+halt and fence, and vsock for liveness.
+
+### Arming
+
+`kmorph arm` runs three kernel operations on the predecessor:
+
+1. **Create.** An overlay transaction written to
+   `/sys/fs/multikernel/overlays/new` creates the instance with the
+   successor's CPUs, memory and devices. The same transaction carries the
+   host tree, a `chosen { multikernel,host-tree { ... } }` node naming
+   every CPU on the machine from the ACPI MADT, the RAM map from
+   `/proc/iomem` and the PCI inventory from sysfs. When the machine has no
+   pool yet, a baseline written to `/sys/fs/multikernel/device_tree`
+   creates one first.
+2. **Load.** `kexec_file_load()` in multikernel mode loads the kernel and
+   initramfs for that instance.
+3. **Exec.** The multikernel `reboot()` command boots it. At that moment the
+   predecessor kernel writes the successor's boot device tree: the host tree
+   goes into the successor's `/chosen` as it was given, and beside it the
+   kernel adds what only it knows, the control regions the successor must
+   never treat as free memory (`multikernel,reserved-memory`) and the park
+   slot where fenced CPUs will wait.
+
+The successor kernel registers every CPU named in the host tree at boot,
+because a CPU can only be fenced or hot-added if its APIC id was
+enumerated then. Everything the successor will need is therefore fixed
+before it boots; nothing is published or refreshed at runtime, so nothing
+can go stale.
+
+### Watching
+
+kmorphd probes the predecessor with a vsock `connect()` to CID 0 on a port
+nobody listens on. A live predecessor kernel answers RST by itself, which
+the successor sees as `ECONNRESET`. Silence, a probe still unanswered when
+the next one is due, is the only evidence of death.
+
+### Takeover
+
+From the successor's point of view the machine splits in two: what it
+owns, tracked by its own accounting, and everything else, which after the
+fence is one bag it absorbs regardless of how the predecessor had divided
+it.
+
+1. **Fence.** `reboot()` with the multikernel force-halt command and
+   `mk_id 0`. The successor kernel NMI-parks every CPU it does not own,
+   sends INIT to stragglers, and confirms each target parked through the
+   presence bitmap the park loop maintains; it returns an error rather than
+   a partial fence.
+2. **Adopt.** kmorphd reads the host tree and the reserved regions back
+   from its own `/proc/device-tree`, subtracts its own RAM from the
+   machine's, subtracts the reserved regions, rounds to whole memory
+   blocks, and applies one overlay against its own instance node with
+   `cpu-add` and `memory-add` items. The kernel wakes fenced CPUs through
+   the predecessor's park slot and hot-adds the memory.
+3. **Reap.** With a dump configured, memory is held back from that overlay,
+   copied through `/dev/mem`, then adopted by a second overlay.
+
+### The daemon's states
+
+```
+ARMED ── timeout ──▶ SUSPECT ── ECONNRESET ──▶ ARMED
+                        │
+                        ├─ probe_timeouts in a row
+                        ▼
+                     FENCING ── lost CPU ──▶ FENCE_FAILED ──(retry)──▶ FENCING
+                        │
+                        ▼
+                     FENCED ── adopt, dump, reap ──▶ TAKEN_OVER
+```
+
+Every transition is logged and written to `/run/kmorph/state`. A failed
+adoption is retried on the next probe event; the fence is idempotent and
+retried a bounded number of times.

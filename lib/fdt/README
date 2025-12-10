@@ -1,0 +1,3 @@
+libfdt vendored from the Linux kernel tree, scripts/dtc/libfdt
+(dtc 1.7.2-ga26ef640), licence GPL-2.0-or-later OR BSD-2-Clause.
+fdt_overlay.c is omitted: kmorph builds overlays, the kernel applies them.
