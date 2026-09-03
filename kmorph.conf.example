@@ -1,0 +1,57 @@
+# kmorph configuration. Install as /etc/kmorph/kmorph.conf on the
+# predecessor and at the same path in the successor initramfs; kmorph
+# and kmorphd read the same file.
+#
+# kernel, cpus and memory are required to arm. Every other key is
+# optional and shown at its default.
+
+# --- Successor (predecessor side, read by kmorph) ---
+
+# Kernel image: an ELF vmlinux or a bzImage.
+kernel  = /boot/vmlinuz
+
+# Initramfs for the successor. It must contain kmorphd.
+initrd  = /boot/successor.img
+
+# CPUs for the successor, as physical (APIC) ids, e.g. 1 or 12-15,20.
+cpus    = 1
+
+# Memory for the successor, e.g. 128MB or 4GB.
+memory  = 128MB
+
+# Kernel command line for the successor.
+#cmdline = earlyprintk=serial,ttyS0,115200 keep_bootcon
+
+# PCI functions handed to the successor, comma separated.
+#devices = 0000:09:00.0
+
+# Instance name in /sys/fs/multikernel/instances.
+#name = successor
+
+# Every CPU on the machine. Set only on a machine without ACPI.
+#machine_cpus = 0-3
+
+# --- Detection and takeover (successor side, read by kmorphd) ---
+
+# How often the predecessor is probed.
+#probe_interval = 100ms
+
+# Consecutive timed-out probes before the predecessor is declared dead.
+#probe_timeouts = 5
+
+# Retries of a fence that could not park every CPU.
+#fence_retries = 3
+
+# File to receive the predecessor's memory as a vmcore before it is
+# reclaimed. A FIFO works. Unset: reclaim at once.
+#dump = /var/crash/predecessor.vmcore
+
+# Serial line the successor takes over after the crash.
+#console = ttyS0
+
+# Speed of that line.
+#console_baud = 115200
+
+# Program the getty runs instead of login, e.g. /bin/sh for an image
+# without accounts.
+#console_login = /bin/sh

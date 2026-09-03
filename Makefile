@@ -63,6 +63,7 @@ check: $(TEST_BINS)
 install: all
 	$(INSTALL) -d $(DESTDIR)$(PREFIX)/bin $(DESTDIR)/etc/kmorph
 	$(INSTALL) -m 0755 $(BIN)/kmorph $(BIN)/kmorphd $(DESTDIR)$(PREFIX)/bin/
+	$(INSTALL) -m 0644 kmorph.conf.example $(DESTDIR)/etc/kmorph/
 
 clean:
 	rm -rf $(BUILD)

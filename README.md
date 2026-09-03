@@ -42,7 +42,8 @@ make install         # binaries to $(PREFIX)/bin, default /usr/local
 ```
 
 The only dependencies are libc and the libfdt sources vendored under
-lib/fdt. `make install` honours `PREFIX` and `DESTDIR` and creates `/etc/kmorph`.
+lib/fdt. `make install` honours `PREFIX` and `DESTDIR` and puts an annotated
+`kmorph.conf.example` in `/etc/kmorph`.
 Copy `kmorph` to the predecessor and `kmorphd` into the successor
 initramfs.
 
