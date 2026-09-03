@@ -26,8 +26,6 @@ directly and needs no other tool.
   `CONFIG_MULTIKERNEL_VSOCKETS=y`, with the host tree interface (the
   `multikernel,host-tree` node in instance-create). x86-64 only.
   `CONFIG_CRASH_DUMP=y` for registers and VMCOREINFO in the dump.
-  Registers also need the multikernel kernel's CPU stop paths to save them,
-  which the current kernel tree does not yet do.
 - An initramfs for the successor that starts `kmorphd` from its init and
   contains `getty` if the serial console is to be recovered. A static
   build of kmorphd needs nothing else from the image.
@@ -284,10 +282,12 @@ halt and fence, and vsock for liveness.
    successor's CPUs, memory and devices. The same transaction carries the
    host tree, a `chosen { multikernel,host-tree { ... } }` node naming
    every CPU on the machine from the ACPI MADT, the RAM map from
-   `/proc/iomem` and the PCI inventory from sysfs. When the kernel has
-   crash dump support, the tree also records where it keeps its
-   vmcoreinfo, its per-CPU crash note buffers and its direct map, for the
-   dump. When the machine has no pool yet, a baseline written to
+   `/proc/iomem` and the PCI inventory from sysfs. With `dump` set, the
+   tree also carries a `vmcore` node with where the kernel keeps its
+   vmcoreinfo, its per-CPU crash note buffers and its direct map; the
+   node also tells the predecessor kernel to save each CPU's registers
+   when it stops, so the dump carries them. When the machine has no pool
+   yet, a baseline written to
    `/sys/fs/multikernel/device_tree` creates one first.
 2. **Load.** `kexec_file_load()` in multikernel mode loads the kernel and
    initramfs for that instance.

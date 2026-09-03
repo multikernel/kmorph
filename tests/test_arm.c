@@ -352,11 +352,15 @@ static void put_kcore_with_direct_map(void)
 static void arm_records_the_crash_layout_in_the_host_tree(void)
 {
 	struct mkfs fs = { sysfs };
+	char err[64];
 	void *dtbo;
 	size_t len;
 	int ht, vm, sub, plen;
 
 	setup();
+	config_free(&cfg);
+	config_parse("cpus = 12-15\nmemory = 4GB\nkernel = /boot/vmlinuz\ndump = /var/crash/vmcore\n",
+		     &cfg, err, sizeof(err));
 	put("vmcoreinfo", "0x000000007ffd1000 1000\n", 24);
 	put_cpu_note(0, "7fc01000\n");
 	put_cpu_note(1, "7fc01400\n");
@@ -377,7 +381,7 @@ static void arm_records_the_crash_layout_in_the_host_tree(void)
 	config_free(&cfg);
 }
 
-static void arm_without_crash_support_omits_the_vmcore_node(void)
+static void arm_without_a_dump_omits_the_vmcore_node(void)
 {
 	struct mkfs fs = { sysfs };
 	void *dtbo;
@@ -385,6 +389,27 @@ static void arm_without_crash_support_omits_the_vmcore_node(void)
 	int ht;
 
 	setup();
+	CHECK_EQ(arm_run(&cfg, &fs, &hooks), 0);
+	dtbo = read_blob("overlays/new", &len);
+	ht = chosen_host_tree(dtbo);
+	CHECK(ht >= 0);
+	CHECK(fdt_subnode_offset(dtbo, ht, "vmcore") < 0);
+	free(dtbo);
+	config_free(&cfg);
+}
+
+static void arm_without_crash_support_omits_the_vmcore_node(void)
+{
+	struct mkfs fs = { sysfs };
+	char err[64];
+	void *dtbo;
+	size_t len;
+	int ht;
+
+	setup();
+	config_free(&cfg);
+	config_parse("cpus = 12-15\nmemory = 4GB\nkernel = /boot/vmlinuz\ndump = /var/crash/vmcore\n",
+		     &cfg, err, sizeof(err));
 	unlink(vmcoreinfo_path);
 	unlink(kcore_path);
 	{
@@ -690,6 +715,7 @@ TEST_MAIN({
 	RUN(arm_hands_over_a_host_tree_from_firmware_and_sysfs);
 	RUN(config_machine_cpus_override_the_madt);
 	RUN(arm_records_the_crash_layout_in_the_host_tree);
+	RUN(arm_without_a_dump_omits_the_vmcore_node);
 	RUN(arm_without_crash_support_omits_the_vmcore_node);
 	RUN(arm_refuses_to_proceed_without_a_host_tree);
 	RUN(console_config_hands_the_serial_device_to_the_successor);

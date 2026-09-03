@@ -259,7 +259,9 @@ static int build_host_tree(const struct kmorph_config *cfg, const struct arm_hoo
 	}
 	if (pci_list_all(h->pci_root, &ht->devices))
 		log_warn("no PCI inventory under %s; host tree lists no devices", h->pci_root);
-	read_crash_layout(h, &ht->vmcore);
+	/* The node tells the predecessor kernel to save registers when it stops. */
+	if (cfg->dump)
+		read_crash_layout(h, &ht->vmcore);
 
 	log_info("host tree: %zu CPUs, %llu MB in %zu ranges, %zu PCI devices, %zu CPU notes",
 		 ht->cpus.count, (unsigned long long)rangeset_total(&ht->ram) >> 20,
