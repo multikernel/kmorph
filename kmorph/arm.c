@@ -306,9 +306,48 @@ static int create_instance(const struct kmorph_config *cfg, const struct mkfs *f
 	return ret;
 }
 
+/*
+ * The successor dumps through /dev/mem, and IO_STRICT_DEVMEM refuses the
+ * busy "RAM buffer" its e820 code registers above its own RAM, which is
+ * predecessor memory. iomem=relaxed lifts that without touching the
+ * protection of the kernel's own pages.
+ */
+#define DUMP_CMDLINE_PARAM "iomem=relaxed"
+
+static bool cmdline_has_word(const char *cmdline, const char *word)
+{
+	size_t n = strlen(word);
+	const char *p = cmdline;
+
+	while ((p = strstr(p, word))) {
+		bool starts = p == cmdline || p[-1] == ' ';
+		bool ends = p[n] == '\0' || p[n] == ' ';
+
+		if (starts && ends)
+			return true;
+		p += n;
+	}
+	return false;
+}
+
+/* The configured command line, plus what the dump needs; caller frees. */
+static char *successor_cmdline(const struct kmorph_config *cfg)
+{
+	const char *base = cfg->cmdline ? cfg->cmdline : "";
+	char *out;
+
+	if (!cfg->dump || cmdline_has_word(base, DUMP_CMDLINE_PARAM))
+		return cfg->cmdline ? strdup(cfg->cmdline) : NULL;
+	if (asprintf(&out, "%s%s" DUMP_CMDLINE_PARAM, base, *base ? " " : "") < 0)
+		return NULL;
+	return out;
+}
+
 static int load_and_exec(const struct kmorph_config *cfg, const struct arm_hooks *h, int id)
 {
 	int kernel_fd, initrd_fd = -1, ret;
+	bool expected;
+	char *cmdline;
 
 	kernel_fd = h->open_kernel(cfg->kernel);
 	if (kernel_fd < 0) {
@@ -325,10 +364,21 @@ static int load_and_exec(const struct kmorph_config *cfg, const struct arm_hooks
 		}
 	}
 
-	ret = h->kexec_load(kernel_fd, initrd_fd, cfg->cmdline, id);
+	expected = cfg->cmdline || cfg->dump;
+	cmdline = successor_cmdline(cfg);
+	if (!cmdline && expected) {
+		close(kernel_fd);
+		if (initrd_fd >= 0)
+			close(initrd_fd);
+		log_err("cannot build the successor's command line: %s", strerror(ENOMEM));
+		return -ENOMEM;
+	}
+
+	ret = h->kexec_load(kernel_fd, initrd_fd, cmdline, id);
 	close(kernel_fd);
 	if (initrd_fd >= 0)
 		close(initrd_fd);
+	free(cmdline);
 	if (ret) {
 		log_err("kexec_file_load failed: %s", strerror(-ret));
 		return ret;

@@ -99,7 +99,7 @@ programs read the same file; each uses the keys for its side. `kernel`,
 | `memory` | | Memory for the successor, e.g. `128MB`, `4GB`. |
 | `kernel` | | Kernel image: an ELF vmlinux, or a bzImage from which the vmlinux is extracted. |
 | `initrd` | | Initramfs for the successor. |
-| `cmdline` | | Kernel command line for the successor. See [Successor console](#successor-console). |
+| `cmdline` | | Kernel command line for the successor. See [Successor console](#successor-console). With `dump` set, kmorph adds `iomem=relaxed`, which the successor needs to read the predecessor's memory through `/dev/mem` on kernels built with `IO_STRICT_DEVMEM`. |
 | `devices` | | PCI functions handed to the successor, comma separated, e.g. `0000:09:00.0`. Give it its own NIC and disk. |
 | `machine_cpus` | from the MADT | Every CPU on the machine. Set only on a machine without ACPI. |
 | `console` | | Serial line the successor takes over after the crash, e.g. `ttyS0`. |
@@ -187,8 +187,11 @@ FENCE_FAILED, FENCED and TAKEN_OVER.
    The file is an ELF core in the format of kdump's `/proc/vmcore`: one
    segment per memory range, the registers of every CPU at the moment it
    stopped, and the crashed kernel's VMCOREINFO, so `crash` and
-   `makedumpfile` read it directly. If the dump fails, the memory stays
-   unclaimed and readable rather than being destroyed.
+   `makedumpfile` read it directly. The successor reads the memory through
+   `/dev/mem`; `kmorph arm` boots it with `iomem=relaxed` so
+   `IO_STRICT_DEVMEM` does not get in the way, and the successor must not be
+   booted locked down. If the dump fails, the memory stays unclaimed and
+   readable rather than being destroyed.
 5. **Console.** With `console` set, a getty is started on the serial line.
 
 Takeover is one-shot. Afterwards the successor is the machine's kernel and

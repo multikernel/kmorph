@@ -198,6 +198,37 @@ static void arm_creates_loads_and_execs(void)
 	config_free(&cfg);
 }
 
+static void dump_config_relaxes_the_successors_devmem(void)
+{
+	struct mkfs fs = { sysfs };
+	char err[64];
+
+	setup();
+	config_free(&cfg);
+	config_parse("cpus = 12\nmemory = 1GB\nkernel = /boot/vmlinuz\ncmdline = quiet\n"
+		     "dump = /var/crash/vmcore\n", &cfg, err, sizeof(err));
+	CHECK_EQ(arm_run(&cfg, &fs, &hooks), 0);
+	CHECK_STREQ(calls.cmdline, "quiet iomem=relaxed");
+	config_free(&cfg);
+
+	setup();
+	config_free(&cfg);
+	config_parse("cpus = 12\nmemory = 1GB\nkernel = /boot/vmlinuz\ndump = /var/crash/vmcore\n",
+		     &cfg, err, sizeof(err));
+	CHECK_EQ(arm_run(&cfg, &fs, &hooks), 0);
+	CHECK_STREQ(calls.cmdline, "iomem=relaxed");
+	config_free(&cfg);
+
+	setup();
+	config_free(&cfg);
+	config_parse("cpus = 12\nmemory = 1GB\nkernel = /boot/vmlinuz\n"
+		     "cmdline = iomem=relaxed quiet\ndump = /var/crash/vmcore\n",
+		     &cfg, err, sizeof(err));
+	CHECK_EQ(arm_run(&cfg, &fs, &hooks), 0);
+	CHECK_STREQ(calls.cmdline, "iomem=relaxed quiet");
+	config_free(&cfg);
+}
+
 static void arm_passes_devices_to_the_instance(void)
 {
 	struct mkfs fs = { sysfs };
@@ -654,6 +685,7 @@ TEST_MAIN({
 	mkdir(cpu_root, 0755);
 	CHECK_EQ(file_write(block_size, "8000000\n", 8), 0);
 	RUN(arm_creates_loads_and_execs);
+	RUN(dump_config_relaxes_the_successors_devmem);
 	RUN(arm_passes_devices_to_the_instance);
 	RUN(arm_hands_over_a_host_tree_from_firmware_and_sysfs);
 	RUN(config_machine_cpus_override_the_madt);
