@@ -104,7 +104,7 @@ size_t vmlinux_elf_size(const void *elf, size_t len)
 		if (ph->p_offset + ph->p_filesz > end)
 			end = ph->p_offset + ph->p_filesz;
 	}
-	return end < len ? end : len;
+	return end;
 }
 
 static int memfd_with(const char *name, const void *data, size_t len)
@@ -161,7 +161,7 @@ static int trim_to_elf(int fd)
 	if (total <= 0 || n <= 0)
 		return -EINVAL;
 	elf_len = vmlinux_elf_size(head, n);
-	if (!elf_len)
+	if (!elf_len || (off_t)elf_len > total)
 		return -EINVAL;
 	if ((off_t)elf_len < total && ftruncate(fd, elf_len) < 0)
 		return -errno;

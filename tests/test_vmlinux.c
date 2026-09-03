@@ -113,6 +113,42 @@ static void open_extracts_gzipped_bzimage_into_memfd(void)
 	close(fd);
 }
 
+/* Real kernels are far larger than the head the trimmer inspects. */
+static void open_keeps_an_elf_larger_than_the_inspected_head(void)
+{
+	size_t payload_off = 200 * 1024, elf_len = payload_off + 16;
+	unsigned char *elf = calloc(1, elf_len + 8);
+	char path[256], cmd[512];
+	void *gz, *img;
+	size_t gz_len, img_len;
+	int fd;
+
+	fake_elf(elf);
+	*(uint64_t *)(elf + 64 + 8) = payload_off;	/* p_offset */
+	memset(elf + payload_off, 0xaa, 16);
+	memset(elf + elf_len, 0xbb, 8);
+
+	snprintf(path, sizeof(path), "%s/bigpayload", dir);
+	CHECK_EQ(file_write(path, elf, elf_len + 8), 0);
+	snprintf(cmd, sizeof(cmd), "gzip -kf %s", path);
+	CHECK_EQ(system(cmd), 0);
+	snprintf(path, sizeof(path), "%s/bigpayload.gz", dir);
+	CHECK_EQ(file_read(path, &gz, &gz_len), 0);
+
+	img = malloc(5 * 512 + gz_len);
+	img_len = fake_bzimage(img, gz, gz_len);
+	free(gz);
+	snprintf(path, sizeof(path), "%s/bigvmlinuz", dir);
+	CHECK_EQ(file_write(path, img, img_len), 0);
+	free(img);
+
+	fd = vmlinux_open(path);
+	CHECK(fd >= 0);
+	CHECK_EQ(lseek(fd, 0, SEEK_END), (off_t)elf_len);
+	close(fd);
+	free(elf);
+}
+
 static void open_rejects_missing_or_bogus_images(void)
 {
 	char path[256];
@@ -133,5 +169,6 @@ TEST_MAIN({
 	RUN(decompressor_is_chosen_by_magic);
 	RUN(open_returns_elf_files_as_they_are);
 	RUN(open_extracts_gzipped_bzimage_into_memfd);
+	RUN(open_keeps_an_elf_larger_than_the_inspected_head);
 	RUN(open_rejects_missing_or_bogus_images);
 })
