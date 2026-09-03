@@ -1,5 +1,7 @@
 #include "test.h"
 #include "kmorph/ranges.h"
+#include "fdt_helpers.h"
+#include "kmorph/fdtutil.h"
 
 static void add_keeps_sorted_and_merges_adjacent(void)
 {
@@ -113,6 +115,48 @@ static void empty_range_is_rejected(void)
 	CHECK_EQ(s.count, 0);
 }
 
+static void rangelist_keeps_adjacent_entries_apart(void)
+{
+	struct rangelist l = RANGELIST_INIT;
+
+	CHECK_EQ(rangelist_add(&l, 0x1000, 0x400), 0);
+	CHECK_EQ(rangelist_add(&l, 0x1400, 0x400), 0);
+	CHECK_EQ(rangelist_add(&l, 0, 0), 0);
+	CHECK_EQ(l.count, 3);
+	CHECK_EQ(l.r[1].base, 0x1400);
+	CHECK_EQ(l.r[2].size, 0);
+	rangelist_free(&l);
+	CHECK_EQ(l.count, 0);
+	CHECK(l.r == NULL);
+}
+
+static void regs_round_trip_through_cells(void)
+{
+	struct rangelist l = RANGELIST_INIT, back = RANGELIST_INIT;
+	void *fdt = fdt_test_begin(1024);
+	const void *cells;
+	int node, len;
+
+	rangelist_add(&l, 0x1000, 0x400);
+	rangelist_add(&l, 0x1400, 0x400);
+	fdt_begin_node(fdt, "n");
+	CHECK_EQ(fdtutil_prop_regs(fdt, &l), 0);
+	fdt_end_node(fdt);
+	fdt_test_finish(fdt);
+
+	node = fdt_path_offset(fdt, "/n");
+	cells = fdt_getprop(fdt, node, "reg", &len);
+	CHECK_EQ(len, 32);
+	CHECK_EQ(fdtutil_cells_to_rangelist(cells, len, &back), 0);
+	CHECK_EQ(back.count, 2);
+	CHECK_EQ(back.r[1].base, 0x1400);
+	CHECK_EQ(back.r[1].size, 0x400);
+	CHECK_EQ(fdtutil_cells_to_rangelist(cells, 24, &back), -EINVAL);
+	rangelist_free(&back);
+	rangelist_free(&l);
+	free(fdt);
+}
+
 TEST_MAIN({
 	RUN(add_keeps_sorted_and_merges_adjacent);
 	RUN(add_merges_overlapping);
@@ -123,4 +167,6 @@ TEST_MAIN({
 	RUN(contains_checks_full_coverage);
 	RUN(align_keeps_only_whole_blocks);
 	RUN(empty_range_is_rejected);
+	RUN(rangelist_keeps_adjacent_entries_apart);
+	RUN(regs_round_trip_through_cells);
 })

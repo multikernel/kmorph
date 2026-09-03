@@ -92,7 +92,7 @@ static void instance_create_carries_the_host_tree_in_chosen(void)
 {
 	uint64_t ids[] = { 1 }, machine_ids[] = { 0, 1, 2, 3 };
 	struct cpulist cpus = { ids, 1 };
-	struct host_tree ht = { { machine_ids, 4 }, RANGESET_INIT, { NULL, 0 } };
+	struct host_tree ht = { { machine_ids, 4 }, RANGESET_INIT, { NULL, 0 }, VMCORE_INFO_INIT };
 	void *dtbo;
 	size_t len;
 	int op, chosen, node, mem;

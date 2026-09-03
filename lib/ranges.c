@@ -168,3 +168,23 @@ void rangeset_free(struct rangeset *s)
 	s->count = 0;
 	s->cap = 0;
 }
+
+int rangelist_add(struct rangelist *l, uint64_t base, uint64_t size)
+{
+	struct range *grown = realloc(l->r, (l->count + 1) * sizeof(*grown));
+
+	if (!grown)
+		return -ENOMEM;
+	l->r = grown;
+	l->r[l->count].base = base;
+	l->r[l->count].size = size;
+	l->count++;
+	return 0;
+}
+
+void rangelist_free(struct rangelist *l)
+{
+	free(l->r);
+	l->r = NULL;
+	l->count = 0;
+}

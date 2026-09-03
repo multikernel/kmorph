@@ -16,6 +16,9 @@ struct arm_hooks {
 	const char *block_size_path;	/* memory block size, hex */
 	const char *madt_path;		/* ACPI MADT, for the machine CPU list */
 	const char *iomem_path;		/* /proc/iomem, for the machine RAM map */
+	const char *vmcoreinfo_path;	/* /sys/kernel/vmcoreinfo */
+	const char *cpu_root;		/* /sys/devices/system/cpu, for crash_notes */
+	const char *kcore_path;		/* /proc/kcore, for the direct-map base */
 };
 
 extern const struct arm_hooks arm_default_hooks;

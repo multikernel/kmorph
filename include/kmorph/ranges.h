@@ -29,4 +29,15 @@ bool rangeset_contains(const struct rangeset *s, uint64_t base, uint64_t size);
 uint64_t rangeset_total(const struct rangeset *s);
 void rangeset_free(struct rangeset *s);
 
+/* Ranges in the order given, never merged: each entry keeps its identity. */
+struct rangelist {
+	struct range *r;
+	size_t count;
+};
+
+#define RANGELIST_INIT { NULL, 0 }
+
+int rangelist_add(struct rangelist *l, uint64_t base, uint64_t size);
+void rangelist_free(struct rangelist *l);
+
 #endif

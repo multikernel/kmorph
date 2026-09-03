@@ -1,6 +1,7 @@
 #ifndef KMORPH_HOST_TREE_H
 #define KMORPH_HOST_TREE_H
 
+#include "kmorph/crashinfo.h"
 #include "kmorph/parse.h"
 #include "kmorph/pci.h"
 #include "kmorph/ranges.h"
@@ -18,6 +19,11 @@
  *       memory@X { device_type = "memory"; reg = <base size>; } ...
  *       devices { pci_dddd_bb_ss_f { device-type = "pci"; pci-id;
  *                                   vendor-id; device-id; } ... }
+ *       vmcore {                       optional: what a vmcore needs
+ *           page-offset = <u64>;       beyond the memory itself
+ *           vmcoreinfo { reg = <paddr size>; };
+ *           cpu-notes  { reg = <paddr size> ...; };   entry i: Linux CPU i
+ *       };
  *   }
  */
 
@@ -29,6 +35,7 @@ struct host_tree {
 	struct cpulist cpus;
 	struct rangeset ram;
 	struct pci_list devices;
+	struct vmcore_info vmcore;
 };
 
 /* Properties and subnodes of the node, into a node open on fdt. */

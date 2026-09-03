@@ -25,6 +25,9 @@ directly and needs no other tool.
 - A multikernel Linux kernel built with `CONFIG_MULTIKERNEL=y` and
   `CONFIG_MULTIKERNEL_VSOCKETS=y`, with the host tree interface (the
   `multikernel,host-tree` node in instance-create). x86-64 only.
+  `CONFIG_CRASH_DUMP=y` for registers and VMCOREINFO in the dump.
+  Registers also need the multikernel kernel's CPU stop paths to save them,
+  which the current kernel tree does not yet do.
 - An initramfs for the successor that starts `kmorphd` from its init and
   contains `getty` if the serial console is to be recovered. A static
   build of kmorphd needs nothing else from the image.
@@ -110,7 +113,7 @@ programs read the same file; each uses the keys for its side. `kernel`,
 | `probe_interval` | `100ms` | How often the predecessor is probed. A probe unanswered by the next one has timed out. |
 | `probe_timeouts` | `5` | Consecutive timeouts before the predecessor is declared dead. |
 | `fence_retries` | `3` | Retries of a fence that could not park every CPU. |
-| `dump` | | File to receive the predecessor's memory before it is reclaimed. Unset: reclaim at once. |
+| `dump` | | File to receive the predecessor's memory as a vmcore before it is reclaimed. A FIFO works. Unset: reclaim at once. |
 
 The successor's probe never mistakes a slow predecessor for a dead one on
 its own evidence: a live predecessor kernel answers every probe by itself,
@@ -180,10 +183,12 @@ FENCE_FAILED, FENCED and TAKEN_OVER.
    predecessor's park slot; memory is hot-added in whole memory blocks,
    128 MB on x86.
 4. **Dump and reclaim.** With `dump` set, memory is left unclaimed until it
-   has been copied to the dump file through `/dev/mem`, then reclaimed. The
-   dump is a sparse file whose offsets are physical addresses. If the dump
-   fails, the memory stays unclaimed and readable rather than being
-   destroyed.
+   has been written to the dump file through `/dev/mem`, then reclaimed.
+   The file is an ELF core in the format of kdump's `/proc/vmcore`: one
+   segment per memory range, the registers of every CPU at the moment it
+   stopped, and the crashed kernel's VMCOREINFO, so `crash` and
+   `makedumpfile` read it directly. If the dump fails, the memory stays
+   unclaimed and readable rather than being destroyed.
 5. **Console.** With `console` set, a getty is started on the serial line.
 
 Takeover is one-shot. Afterwards the successor is the machine's kernel and
@@ -200,6 +205,35 @@ hundred megabytes. Unclaimed memory remains readable through `/dev/mem`.
 The successor keeps the devices it was armed with. Devices that belonged to
 the predecessor are not adopted, so the successor needs its own NIC and
 disk from the start.
+
+### Inspecting the dump
+
+The dump is a vmcore. Open it with the predecessor's vmlinux:
+
+```
+crash /boot/vmlinux /var/crash/predecessor.vmcore
+crash> log
+crash> bt -a
+```
+
+It is the size of the memory the successor took over, sparse where pages
+were zero. To shrink it, filter and compress it afterwards; the embedded
+VMCOREINFO lets makedumpfile do that without the vmlinux:
+
+```
+makedumpfile -c -d 31 predecessor.vmcore predecessor.small
+```
+
+A successor with a NIC but no disk can stream the dump instead of storing
+it: make `dump` a FIFO and feed it to the network from the successor's
+init, and the whole core leaves the machine as it is written:
+
+```
+mkfifo /tmp/vmcore
+nc collector 9999 < /tmp/vmcore &
+```
+
+with `dump = /tmp/vmcore`. Zero pages are sent as zeros on a FIFO.
 
 ## Successor console
 
@@ -227,7 +261,7 @@ the panic, the takeover, and the successor's login prompt.
 - No automatic re-arming after a takeover.
 - No device takeover; the successor runs on the devices it was armed with.
 - Memory is adopted in whole 128 MB blocks; the remainder stays unclaimed.
-- The dump is a raw memory image, not a crash-tool format.
+- The dump is not filtered; makedumpfile can shrink it afterwards.
 - `kmorph upgrade`, a planned takeover for a zero-downtime kernel upgrade,
   is not implemented.
 
@@ -247,9 +281,11 @@ halt and fence, and vsock for liveness.
    successor's CPUs, memory and devices. The same transaction carries the
    host tree, a `chosen { multikernel,host-tree { ... } }` node naming
    every CPU on the machine from the ACPI MADT, the RAM map from
-   `/proc/iomem` and the PCI inventory from sysfs. When the machine has no
-   pool yet, a baseline written to `/sys/fs/multikernel/device_tree`
-   creates one first.
+   `/proc/iomem` and the PCI inventory from sysfs. When the kernel has
+   crash dump support, the tree also records where it keeps its
+   vmcoreinfo, its per-CPU crash note buffers and its direct map, for the
+   dump. When the machine has no pool yet, a baseline written to
+   `/sys/fs/multikernel/device_tree` creates one first.
 2. **Load.** `kexec_file_load()` in multikernel mode loads the kernel and
    initramfs for that instance.
 3. **Exec.** The multikernel `reboot()` command boots it. At that moment the
@@ -291,7 +327,7 @@ it.
    `cpu-add` and `memory-add` items. The kernel wakes fenced CPUs through
    the predecessor's park slot and hot-adds the memory.
 3. **Reap.** With a dump configured, memory is held back from that overlay,
-   copied through `/dev/mem`, then adopted by a second overlay.
+   written as a vmcore through `/dev/mem`, then adopted by a second overlay.
 
 ### The daemon's states
 

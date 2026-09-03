@@ -5,6 +5,7 @@
 #include <stdint.h>
 
 #include "kmorph/parse.h"
+#include "kmorph/ranges.h"
 
 /* Header sanity plus fit within a buffer of the given length; 0 or -EINVAL. */
 int fdtutil_check(const void *fdt, size_t len);
@@ -26,5 +27,8 @@ int fdtutil_prop_cpulist(void *fdt, const char *name, const struct cpulist *l);
  */
 typedef int (*fdtutil_build_fn)(void *fdt, void *arg);
 int fdtutil_build(fdtutil_build_fn fn, void *arg, void **blob, size_t *len);
+
+int fdtutil_cells_to_rangelist(const void *cells, size_t len, struct rangelist *out);
+int fdtutil_prop_regs(void *fdt, const struct rangelist *l);
 
 #endif

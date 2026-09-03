@@ -1,3 +1,4 @@
+#include <elf.h>
 #include <stdlib.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -10,6 +11,7 @@
 
 static char sysfs[] = "/tmp/kmorph-test-arm-XXXXXX";
 static char pci_root[600], block_size[600], madt_path[600], iomem_path[600];
+static char vmcoreinfo_path[600], cpu_root[600], kcore_path[600];
 
 struct calls {
 	char seq[32];
@@ -59,6 +61,9 @@ static const struct arm_hooks hooks = {
 	.block_size_path = block_size,
 	.madt_path = madt_path,
 	.iomem_path = iomem_path,
+	.vmcoreinfo_path = vmcoreinfo_path,
+	.cpu_root = cpu_root,
+	.kcore_path = kcore_path,
 };
 
 static void put(const char *rel, const void *data, size_t len)
@@ -276,6 +281,94 @@ static void config_machine_cpus_override_the_madt(void)
 	ht = chosen_host_tree(dtbo);
 	CHECK(ht >= 0);
 	CHECK_EQ(fdt_test_get_u64(dtbo, ht, "cpus", 7), 7);
+	free(dtbo);
+	config_free(&cfg);
+}
+
+static void put_cpu_note(int n, const char *addr)
+{
+	char rel[64];
+
+	snprintf(rel, sizeof(rel), "cpu/cpu%d", n);
+	mkdir_rel(rel);
+	snprintf(rel, sizeof(rel), "cpu/cpu%d/crash_notes", n);
+	put(rel, addr, strlen(addr));
+	snprintf(rel, sizeof(rel), "cpu/cpu%d/crash_notes_size", n);
+	put(rel, "1024\n", 5);
+}
+
+static void put_kcore_with_direct_map(void)
+{
+	unsigned char blob[sizeof(Elf64_Ehdr) + sizeof(Elf64_Phdr)];
+	Elf64_Ehdr eh;
+	Elf64_Phdr ph;
+
+	memset(&eh, 0, sizeof(eh));
+	memset(&ph, 0, sizeof(ph));
+	memcpy(eh.e_ident, ELFMAG, SELFMAG);
+	eh.e_ident[EI_CLASS] = ELFCLASS64;
+	eh.e_phoff = sizeof(eh);
+	eh.e_phentsize = sizeof(ph);
+	eh.e_phnum = 1;
+	ph.p_type = PT_LOAD;
+	ph.p_vaddr = 0xffff888000100000ULL;
+	ph.p_paddr = 0x100000;
+	memcpy(blob, &eh, sizeof(eh));
+	memcpy(blob + sizeof(eh), &ph, sizeof(ph));
+	put("kcore", blob, sizeof(blob));
+}
+
+static void arm_records_the_crash_layout_in_the_host_tree(void)
+{
+	struct mkfs fs = { sysfs };
+	void *dtbo;
+	size_t len;
+	int ht, vm, sub, plen;
+
+	setup();
+	put("vmcoreinfo", "0x000000007ffd1000 1000\n", 24);
+	put_cpu_note(0, "7fc01000\n");
+	put_cpu_note(1, "7fc01400\n");
+	put_kcore_with_direct_map();
+	CHECK_EQ(arm_run(&cfg, &fs, &hooks), 0);
+	dtbo = read_blob("overlays/new", &len);
+	ht = chosen_host_tree(dtbo);
+	vm = fdt_subnode_offset(dtbo, ht, "vmcore");
+	CHECK(vm >= 0);
+	CHECK_EQ(fdt_test_get_u64(dtbo, vm, "page-offset", 0), 0xffff888000000000ULL);
+	sub = fdt_subnode_offset(dtbo, vm, "vmcoreinfo");
+	CHECK_EQ(fdt_test_get_u64(dtbo, sub, "reg", 0), 0x7ffd1000);
+	sub = fdt_subnode_offset(dtbo, vm, "cpu-notes");
+	CHECK(fdt_getprop(dtbo, sub, "reg", &plen) != NULL);
+	CHECK_EQ(plen, 32);
+	CHECK_EQ(fdt_test_get_u64(dtbo, sub, "reg", 2), 0x7fc01400);
+	free(dtbo);
+	config_free(&cfg);
+}
+
+static void arm_without_crash_support_omits_the_vmcore_node(void)
+{
+	struct mkfs fs = { sysfs };
+	void *dtbo;
+	size_t len;
+	int ht;
+
+	setup();
+	unlink(vmcoreinfo_path);
+	unlink(kcore_path);
+	{
+		char path[1024];
+
+		snprintf(path, sizeof(path), "%s/cpu0/crash_notes", cpu_root);
+		unlink(path);
+		snprintf(path, sizeof(path), "%s/cpu1/crash_notes", cpu_root);
+		unlink(path);
+	}
+	CHECK_EQ(arm_run(&cfg, &fs, &hooks), 0);
+	dtbo = read_blob("overlays/new", &len);
+	ht = chosen_host_tree(dtbo);
+	CHECK(ht >= 0);
+	CHECK(fdt_subnode_offset(dtbo, ht, "vmcore") < 0);
 	free(dtbo);
 	config_free(&cfg);
 }
@@ -555,11 +648,17 @@ TEST_MAIN({
 	snprintf(block_size, sizeof(block_size), "%s/block_size_bytes", sysfs);
 	snprintf(madt_path, sizeof(madt_path), "%s/APIC", sysfs);
 	snprintf(iomem_path, sizeof(iomem_path), "%s/iomem", sysfs);
+	snprintf(vmcoreinfo_path, sizeof(vmcoreinfo_path), "%s/vmcoreinfo", sysfs);
+	snprintf(cpu_root, sizeof(cpu_root), "%s/cpu", sysfs);
+	snprintf(kcore_path, sizeof(kcore_path), "%s/kcore", sysfs);
+	mkdir(cpu_root, 0755);
 	CHECK_EQ(file_write(block_size, "8000000\n", 8), 0);
 	RUN(arm_creates_loads_and_execs);
 	RUN(arm_passes_devices_to_the_instance);
 	RUN(arm_hands_over_a_host_tree_from_firmware_and_sysfs);
 	RUN(config_machine_cpus_override_the_madt);
+	RUN(arm_records_the_crash_layout_in_the_host_tree);
+	RUN(arm_without_crash_support_omits_the_vmcore_node);
 	RUN(arm_refuses_to_proceed_without_a_host_tree);
 	RUN(console_config_hands_the_serial_device_to_the_successor);
 	RUN(console_config_puts_the_serial_device_in_a_new_pool);

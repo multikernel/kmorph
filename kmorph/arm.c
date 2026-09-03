@@ -5,6 +5,7 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "kmorph/crashinfo.h"
 #include "kmorph/dt.h"
 #include "kmorph/log.h"
 #include "kmorph/mksys.h"
@@ -26,6 +27,9 @@ const struct arm_hooks arm_default_hooks = {
 	.block_size_path = MEMORY_BLOCK_SIZE_PATH,
 	.madt_path = MADT_PATH,
 	.iomem_path = IOMEM_PATH,
+	.vmcoreinfo_path = VMCOREINFO_PATH,
+	.cpu_root = CPU_SYSFS_ROOT,
+	.kcore_path = KCORE_PATH,
 };
 
 static bool strlist_has(const struct strlist *l, const char *s)
@@ -205,6 +209,27 @@ static int ensure_pool(const struct kmorph_config *cfg, const struct mkfs *fs,
 	return ret < 0 ? ret : 0;
 }
 
+/* Absence only costs the dump its notes or direct map; arming goes on. */
+static void read_crash_layout(const struct arm_hooks *h, struct vmcore_info *vi)
+{
+	int ret;
+
+	ret = crashinfo_read_vmcoreinfo(h->vmcoreinfo_path, &vi->vmcoreinfo);
+	if (ret)
+		log_warn("no vmcoreinfo at %s (%s); the dump will carry none",
+			 h->vmcoreinfo_path, strerror(-ret));
+	ret = crashinfo_read_cpu_notes(h->cpu_root, &vi->cpu_notes);
+	if (ret)
+		log_warn("no crash_notes under %s (%s); the dump will carry no registers",
+			 h->cpu_root, strerror(-ret));
+	ret = crashinfo_read_page_offset(h->kcore_path, &vi->page_offset);
+	if (ret)
+		log_warn("no direct map in %s (%s); the dump will carry no virtual addresses",
+			 h->kcore_path, strerror(-ret));
+	else
+		vi->has_page_offset = true;
+}
+
 /*
  * The host tree the successor boots with: every CPU on the machine (from
  * the config, else the firmware's MADT), the machine's RAM, and its PCI
@@ -234,15 +259,17 @@ static int build_host_tree(const struct kmorph_config *cfg, const struct arm_hoo
 	}
 	if (pci_list_all(h->pci_root, &ht->devices))
 		log_warn("no PCI inventory under %s; host tree lists no devices", h->pci_root);
+	read_crash_layout(h, &ht->vmcore);
 
-	log_info("host tree: %zu CPUs, %llu MB in %zu ranges, %zu PCI devices",
+	log_info("host tree: %zu CPUs, %llu MB in %zu ranges, %zu PCI devices, %zu CPU notes",
 		 ht->cpus.count, (unsigned long long)rangeset_total(&ht->ram) >> 20,
-		 ht->ram.count, ht->devices.count);
+		 ht->ram.count, ht->devices.count, ht->vmcore.cpu_notes.count);
 	return 0;
 fail:
 	if (ht->cpus.ids != cfg->machine_cpus.ids)
 		cpulist_free(&ht->cpus);
 	rangeset_free(&ht->ram);
+	vmcore_info_free(&ht->vmcore);
 	return ret;
 }
 

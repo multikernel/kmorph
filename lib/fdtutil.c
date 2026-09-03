@@ -136,3 +136,42 @@ int fdtutil_build(fdtutil_build_fn fn, void *arg, void **blob, size_t *len)
 	*blob = fdt;
 	return 0;
 }
+
+int fdtutil_cells_to_rangelist(const void *cells, size_t len, struct rangelist *out)
+{
+	const fdt64_t *p = cells;
+	size_t i, n;
+	int ret;
+
+	if (len % (2 * sizeof(*p)))
+		return -EINVAL;
+	n = len / (2 * sizeof(*p));
+	out->r = NULL;
+	out->count = 0;
+	for (i = 0; i < n; i++) {
+		ret = rangelist_add(out, fdt64_to_cpu(p[2 * i]), fdt64_to_cpu(p[2 * i + 1]));
+		if (ret) {
+			rangelist_free(out);
+			return ret;
+		}
+	}
+	return 0;
+}
+
+int fdtutil_prop_regs(void *fdt, const struct rangelist *l)
+{
+	fdt64_t *cells;
+	size_t i;
+	int ret;
+
+	cells = malloc(2 * l->count * sizeof(*cells) + 1);
+	if (!cells)
+		return -FDT_ERR_INTERNAL;
+	for (i = 0; i < l->count; i++) {
+		cells[2 * i] = cpu_to_fdt64(l->r[i].base);
+		cells[2 * i + 1] = cpu_to_fdt64(l->r[i].size);
+	}
+	ret = fdt_property(fdt, "reg", cells, 2 * l->count * sizeof(*cells));
+	free(cells);
+	return ret;
+}

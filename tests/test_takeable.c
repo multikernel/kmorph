@@ -4,7 +4,7 @@
 static struct host_tree machine(void)
 {
 	static uint64_t ids[] = { 0, 1, 2, 3, 4, 5 };
-	struct host_tree ht = { { ids, 6 }, RANGESET_INIT, { NULL, 0 } };
+	struct host_tree ht = { { ids, 6 }, RANGESET_INIT, { NULL, 0 }, VMCORE_INFO_INIT };
 
 	rangeset_add(&ht.ram, 0x1000, 0x9f000);
 	rangeset_add(&ht.ram, 0x100000, 0x7ff00000);

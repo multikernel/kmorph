@@ -1,3 +1,4 @@
+#include <elf.h>
 #include <stdlib.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -59,6 +60,8 @@ static void populate(void)
 	mkdir_rel(devtree, "chosen/multikernel,host-tree");
 	mkdir_rel(devtree, "chosen/multikernel,host-tree/memory@1000");
 	mkdir_rel(devtree, "chosen/multikernel,host-tree/memory@100000");
+	mkdir_rel(devtree, "chosen/multikernel,host-tree/vmcore");
+	mkdir_rel(devtree, "chosen/multikernel,host-tree/vmcore/cpu-notes");
 	put_rel(devtree, "model", "successor", 10);
 	put_rel(devtree, "id", &id, 4);
 	{
@@ -80,6 +83,9 @@ static void populate(void)
 		cells[0] = cpu_to_fdt64(0x100000);
 		cells[1] = cpu_to_fdt64(0x200000);
 		put_rel(devtree, "chosen/multikernel,host-tree/memory@100000/reg", cells, 16);
+		cells[0] = cpu_to_fdt64(0x1000);
+		cells[1] = cpu_to_fdt64(0x400);
+		put_rel(devtree, "chosen/multikernel,host-tree/vmcore/cpu-notes/reg", cells, 16);
 	}
 
 	mkdir(sysfs, 0755);
@@ -92,6 +98,14 @@ static void populate(void)
 	put(iomem, iomem_text, sizeof(iomem_text) - 1);
 	put(blocksize, "1000\n", 5);
 	memset(image, 0x5a, sizeof(image));
+	{
+		Elf64_Nhdr nh = { 5, 8, NT_PRSTATUS };
+
+		memset(image + 0x1000, 0, 0x400);
+		memcpy(image + 0x1000, &nh, sizeof(nh));
+		memcpy(image + 0x1000 + 12, "CORE", 5);
+		memset(image + 0x1000 + 20, 0xab, 8);
+	}
 	put(mem, image, sizeof(image));
 }
 
@@ -234,8 +248,18 @@ static void adopt_with_dump_keeps_memory_until_reaped(void)
 
 	CHECK_EQ(ops_preserve(&o), 0);
 	CHECK_EQ(file_read(dumpfile, &data, &len), 0);
-	CHECK_EQ(len, 0x200000);
-	CHECK_EQ(((unsigned char *)data)[0x1000], 0x5a);
+	{
+		Elf64_Ehdr *eh = data;
+		Elf64_Phdr *ph = (Elf64_Phdr *)((char *)data + eh->e_phoff);
+
+		CHECK_EQ(memcmp(eh->e_ident, ELFMAG, SELFMAG), 0);
+		CHECK_EQ(eh->e_phnum, 4);		/* PT_NOTE + 3 takeable ranges */
+		CHECK_EQ(ph[0].p_type, PT_NOTE);
+		CHECK_EQ(ph[0].p_filesz, 28);		/* one CORE note: 12 + 8 + 8 */
+		CHECK_EQ(ph[1].p_paddr, 0x1000);
+		CHECK_EQ(ph[3].p_paddr, 0x100000);
+		CHECK_EQ(((unsigned char *)data)[ph[3].p_offset], 0x5a);
+	}
 	free(data);
 
 	CHECK_EQ(ops_reap(&o), 0);
@@ -246,6 +270,22 @@ static void adopt_with_dump_keeps_memory_until_reaped(void)
 	CHECK(fdt_subnode_offset(dtbo, ov, "memory-add") >= 0);
 	CHECK_EQ(o.preserved.count, 0);
 	free(dtbo);
+	ops_free(&o);
+}
+
+static void failed_dump_keeps_the_memory_unclaimed(void)
+{
+	struct ops o;
+	struct ops_env bad;
+
+	setup_env(dumpfile);
+	bad = env;
+	bad.mem_path = "/nonexistent/mem";
+	CHECK_EQ(ops_init(&o, &bad), 0);
+	CHECK_EQ(ops_adopt(&o), 0);
+	CHECK_EQ(o.preserved.count, 3);
+	CHECK(ops_preserve(&o) < 0);
+	CHECK_EQ(o.preserved.count, 3);
 	ops_free(&o);
 }
 
@@ -267,4 +307,5 @@ TEST_MAIN({
 	RUN(adopt_computes_takeable_and_aligns_to_blocks);
 	RUN(adopt_without_dump_takes_everything);
 	RUN(adopt_with_dump_keeps_memory_until_reaped);
+	RUN(failed_dump_keeps_the_memory_unclaimed);
 })

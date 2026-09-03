@@ -143,16 +143,22 @@ int ops_adopt(struct ops *o)
 
 int ops_preserve(struct ops *o)
 {
+	struct dump_stats st;
 	int ret;
 
 	if (!o->env.dump_path || !o->preserved.count)
 		return 0;
-	ret = dump_ranges(o->env.mem_path, &o->takeable.memory, o->env.dump_path);
+	ret = dump_vmcore(o->env.mem_path, &o->takeable.memory, &o->host.vmcore,
+			  o->env.dump_path, &st);
 	if (ret)
 		log_err("dump to %s failed: %s; memory left in the pool", o->env.dump_path,
 			strerror(-ret));
 	else
-		log_info("predecessor memory dumped to %s", o->env.dump_path);
+		log_info("predecessor memory dumped to %s: %llu MB in %zu ranges, %zu CPU notes, vmcoreinfo %s",
+			 o->env.dump_path,
+			 (unsigned long long)rangeset_total(&o->takeable.memory) >> 20,
+			 o->takeable.memory.count, st.cpu_notes,
+			 st.vmcoreinfo ? "present" : "absent");
 	return ret;
 }
 
