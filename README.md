@@ -38,10 +38,12 @@ directly and needs no other tool.
 make                 # build/bin/kmorph and build/bin/kmorphd
 make STATIC=1        # static binaries (musl), for the successor initramfs
 make check           # unit tests
+make install         # binaries to $(PREFIX)/bin, default /usr/local
 ```
 
 The only dependencies are libc and the libfdt sources vendored under
-lib/fdt. Copy `kmorph` to the predecessor and `kmorphd` into the successor
+lib/fdt. `make install` honours `PREFIX` and `DESTDIR` and creates `/etc/kmorph`.
+Copy `kmorph` to the predecessor and `kmorphd` into the successor
 initramfs.
 
 ## Quick start

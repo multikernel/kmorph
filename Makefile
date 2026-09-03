@@ -1,6 +1,9 @@
 CC      ?= gcc
 CFLAGS  ?= -O2 -g
 LDFLAGS ?=
+PREFIX  ?= /usr/local
+DESTDIR ?=
+INSTALL ?= install
 
 ifeq ($(STATIC),1)
 CC      = musl-gcc
@@ -57,10 +60,14 @@ check: $(TEST_BINS)
 	@for t in $(TEST_BINS); do echo "== $$t"; $$t || exit 1; done
 	@echo "all tests passed"
 
+install: all
+	$(INSTALL) -d $(DESTDIR)$(PREFIX)/bin $(DESTDIR)/etc/kmorph
+	$(INSTALL) -m 0755 $(BIN)/kmorph $(BIN)/kmorphd $(DESTDIR)$(PREFIX)/bin/
+
 clean:
 	rm -rf $(BUILD)
 
 -include $(LIB_OBJS:.o=.d) $(KMORPHD_OBJS:.o=.d) $(KMORPH_OBJS:.o=.d)
 -include $(BUILD)/kmorphd/main.d $(BUILD)/kmorph/main.d
 
-.PHONY: all check clean
+.PHONY: all check install clean
