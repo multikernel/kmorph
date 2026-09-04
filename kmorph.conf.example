@@ -31,6 +31,11 @@ memory  = 128MB
 # Every CPU on the machine. Set only on a machine without ACPI.
 #machine_cpus = 0-3
 
+# Kernel modules the distro image builders add to the successor image,
+# comma separated: the vsock transport when it is a module, drivers for
+# devices handed to the successor. Ignored by the kmorph init image.
+#modules = mk_transport
+
 # --- Detection and takeover (successor side, read by kmorphd) ---
 
 # How often the predecessor is probed.

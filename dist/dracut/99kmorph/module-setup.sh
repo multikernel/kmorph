@@ -12,6 +12,17 @@ depends() {
 	echo systemd
 }
 
+# Modules the config asks for: the vsock transport when it is one,
+# drivers for devices handed to the successor.
+installkernel() {
+	local mods
+
+	[ -f /etc/kmorph/kmorph.conf ] || return 0
+	mods=$(sed -n 's/^modules[[:space:]]*=[[:space:]]*//p' /etc/kmorph/kmorph.conf | tr ',' ' ')
+	[ -n "$mods" ] && hostonly='' instmods $mods
+	return 0
+}
+
 install() {
 	inst_binary /usr/bin/kmorphd
 	[ -f /etc/kmorph/kmorph.conf ] && inst_simple /etc/kmorph/kmorph.conf

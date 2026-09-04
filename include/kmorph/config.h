@@ -19,6 +19,7 @@ struct kmorph_config {
 	char *cmdline;
 	struct strlist devices;	/* PCI ids handed to the successor */
 	struct cpulist machine_cpus;	/* every CPU on the machine; empty: read the MADT */
+	struct strlist modules;	/* kernel modules the image builders add; unused by kmorph itself */
 
 	/* Detection (successor side) */
 	uint64_t probe_interval_ms;

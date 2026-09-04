@@ -16,4 +16,8 @@ copy_exec /usr/bin/kmorphd /usr/bin
 if [ -f /etc/kmorph/kmorph.conf ]; then
 	mkdir -p "$DESTDIR/etc/kmorph"
 	copy_file config /etc/kmorph/kmorph.conf /etc/kmorph/kmorph.conf
+	# Modules the config asks for: the vsock transport when it is one,
+	# drivers for devices handed to the successor.
+	mods=$(sed -n 's/^modules[[:space:]]*=[[:space:]]*//p' /etc/kmorph/kmorph.conf | tr ',' ' ')
+	[ -n "$mods" ] && manual_add_modules $mods
 fi

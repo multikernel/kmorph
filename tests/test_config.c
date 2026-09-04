@@ -157,6 +157,18 @@ static void console_needs_a_login_program(void)
 	config_free(&c);
 }
 
+static void modules_is_a_list_for_the_image_builders(void)
+{
+	struct kmorph_config c;
+	char err[128];
+
+	CHECK_EQ(config_parse("modules = mk_transport, usbhid, hid_generic\n", &c, err, sizeof(err)), 0);
+	CHECK_EQ(c.modules.count, 3);
+	CHECK_STREQ(c.modules.items[0], "mk_transport");
+	CHECK_STREQ(c.modules.items[2], "hid_generic");
+	config_free(&c);
+}
+
 TEST_MAIN({
 	RUN(defaults_apply_when_keys_are_absent);
 	RUN(parses_every_key_with_comments_and_spacing);
@@ -168,4 +180,5 @@ TEST_MAIN({
 	RUN(load_reads_a_file);
 	RUN(parsed_text_is_kept_verbatim);
 	RUN(console_needs_a_login_program);
+	RUN(modules_is_a_list_for_the_image_builders);
 })

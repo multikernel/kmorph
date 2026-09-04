@@ -65,6 +65,10 @@ static int config_set(struct kmorph_config *c, const char *key, const char *valu
 		strlist_free(&c->devices);
 		return *value ? parse_strlist(value, &c->devices) : 0;
 	}
+	if (!strcmp(key, "modules")) {
+		strlist_free(&c->modules);
+		return *value ? parse_strlist(value, &c->modules) : 0;
+	}
 	if (!strcmp(key, "probe_interval"))
 		return parse_duration_ms(value, &c->probe_interval_ms);
 	if (!strcmp(key, "probe_timeouts"))
@@ -183,6 +187,7 @@ void config_free(struct kmorph_config *c)
 	free(c->cmdline);
 	strlist_free(&c->devices);
 	cpulist_free(&c->machine_cpus);
+	strlist_free(&c->modules);
 	free(c->dump);
 	free(c->console);
 	free(c->console_login);

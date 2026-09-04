@@ -30,7 +30,9 @@ directly and needs no other tool.
   the serial console is wanted: then `console_login` names a static
   program, busybox's `sh` for instance, and kmorph copies it in. The
   successor kernel needs the serial driver, the multikernel filesystem
-  and the vsock transport built in, since the image carries no modules.
+  and the vsock transport built in, since that image carries no modules.
+  The distro image carries the host's drivers plus whatever `modules`
+  names, such as the vsock transport when it is a module.
 - On the predecessor, root, and `gzip`, `xz`, `zstd` or `lz4` if the
   kernel image is a bzImage rather than an ELF vmlinux.
 
@@ -149,6 +151,7 @@ programs read the same file; each uses the keys for its side. `kernel`,
 | `cmdline` | | Kernel command line for the successor. See [Successor console](#successor-console). With `dump` set, kmorph adds `iomem=relaxed`, which the successor needs to read the predecessor's memory through `/dev/mem` on kernels built with `IO_STRICT_DEVMEM`. |
 | `devices` | | PCI functions handed to the successor, comma separated, e.g. `0000:09:00.0`. Give it its own NIC and disk. |
 | `machine_cpus` | from the MADT | Every CPU on the machine. Set only on a machine without ACPI. |
+| `modules` | | Kernel modules the distro image builders add to the successor image, comma separated: the vsock transport when it is a module, drivers for devices in `devices`. The `kmorph init` image has no module loader and ignores it. |
 | `console` | | Serial line the successor takes over after the crash, e.g. `ttyS0`. |
 | `console_baud` | `115200` | Speed of that line. |
 | `console_login` | | Program run on the serial line after the takeover, required with `console`. With the default image it must be a static executable, which `kmorph init` copies in; a user image carries its own. |
