@@ -1,0 +1,10 @@
+#!/bin/sh
+# Start kmorphd before the root device is looked for; it daemonises.
+PREREQ="udev"
+prereqs() { echo "$PREREQ"; }
+case "$1" in
+prereqs) prereqs; exit 0 ;;
+esac
+
+[ -x /usr/bin/kmorphd ] && /usr/bin/kmorphd
+exit 0

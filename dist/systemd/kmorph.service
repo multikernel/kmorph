@@ -1,0 +1,14 @@
+[Unit]
+Description=Arm a kmorph successor kernel
+After=local-fs.target
+ConditionPathExists=/etc/kmorph/kmorph.conf
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStartPre=/bin/sh -c 'test -f /var/lib/kmorph/successor.img || /usr/lib/kmorph/kmorph-mkimage'
+ExecStart=/usr/bin/kmorph arm
+ExecStop=/usr/bin/kmorph disarm
+
+[Install]
+WantedBy=multi-user.target

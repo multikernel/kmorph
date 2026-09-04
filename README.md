@@ -92,6 +92,45 @@ From here the successor probes the predecessor five times a second. If the
 predecessor dies, the successor takes over on its own. To stand down, run
 `kmorph disarm`.
 
+## On a distro
+
+The package route is the one kdump uses. `make install PREFIX=/usr`
+places, from `dist/`, a dracut module and an initramfs-tools hook, a
+helper that runs whichever of dracut or mkinitramfs the host has to
+write `/var/lib/kmorph/successor.img` with kmorphd inside, a
+`kmorph.service` that builds the image if it is missing, arms at boot
+and disarms on stop, and a kernel hook, for kernel-install and for
+Debian's `postinst.d`, that rebuilds the image for the kernel just
+installed and points the `kernel` and `cmdline` keys at it.
+
+The successor's image is thus the distro's own initramfs with kmorphd
+inside it, at the path `kmorph arm` reads by default, while the host's
+boot initramfs is left alone. In the successor, kmorphd is started by
+the initramfs's init while it waits for a root device the host still
+owns. The operator writes the remaining keys once:
+
+```ini
+cpus    = 47
+memory  = 512MB
+console = ttyS0
+console_login = /bin/sh
+```
+
+and enables the service:
+
+```
+systemctl enable --now kmorph
+```
+
+`memory` must hold an unpacked distro initramfs; `kmorph arm` warns when
+it cannot. `console_login` needs no static program here, since the
+initramfs has libc. `kmorph init` is not involved.
+
+After a takeover the successor sits in the initramfs with the console
+until the kernel can hand it the host's disk, at which point the
+initramfs mounts root and the machine continues as itself. That
+handover is kernel work still to come.
+
 ## Configuration
 
 The file is `key = value`, one per line, `#` starts a comment. Both

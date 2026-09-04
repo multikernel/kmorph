@@ -1,0 +1,41 @@
+#!/bin/bash
+# Rebuild the successor image for the kernel just installed and point
+# the kmorph config at it, so the successor keeps up with kernel
+# updates. Runs as a kernel-install plugin (add|remove VERSION ...) and
+# as a Debian kernel postinst hook (VERSION IMAGE). Only the kernel and
+# cmdline keys are touched; the rest is the operator's.
+CONF=/etc/kmorph/kmorph.conf
+
+case "$1" in
+add) KERNEL_VERSION="$2" ;;
+remove) exit 0 ;;
+*) KERNEL_VERSION="$1" ;;
+esac
+
+[ -n "$KERNEL_VERSION" ] || exit 0
+[ -f "$CONF" ] || exit 0
+
+KERNEL="/boot/vmlinuz-$KERNEL_VERSION"
+[ -f "$KERNEL" ] || exit 0
+
+# The host's own root parameters, plus retry values that keep the
+# initramfs waiting for a root device the host still owns.
+CMDLINE=""
+for word in $(cat /proc/cmdline); do
+	case "$word" in
+	root=*|rootflags=*|rootfstype=*|rd.*|ro|rw) CMDLINE="$CMDLINE $word" ;;
+	esac
+done
+CMDLINE="${CMDLINE# } rd.retry=2147483647 rd.timeout=0 rootdelay=2147483647"
+
+set_key() {
+	if grep -q "^$1[[:space:]]*=" "$CONF"; then
+		sed -i "s|^$1[[:space:]]*=.*|$1 = $2|" "$CONF"
+	else
+		printf '%s = %s\n' "$1" "$2" >> "$CONF"
+	fi
+}
+
+set_key kernel "$KERNEL"
+set_key cmdline "$CMDLINE"
+exec /usr/lib/kmorph/kmorph-mkimage "$KERNEL_VERSION"

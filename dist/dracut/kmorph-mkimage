@@ -1,0 +1,28 @@
+#!/bin/bash
+# Build the successor image with the distro's own initramfs tooling:
+# the host's initramfs for the given kernel version with kmorphd added,
+# at the path kmorph arm reads by default. The host's own boot
+# initramfs is left alone, as kdump leaves it: the dracut module is
+# added only here, and the initramfs-tools hook acts only when
+# KMORPH_IMAGE is set.
+IMAGE=/var/lib/kmorph/successor.img
+CONF=/etc/kmorph/kmorph.conf
+
+version="$1"
+if [ -z "$version" ] && [ -f "$CONF" ]; then
+	kernel=$(sed -n 's/^kernel[[:space:]]*=[[:space:]]*//p' "$CONF" | tail -1)
+	case "$kernel" in
+	*/vmlinuz-*) version="${kernel##*/vmlinuz-}" ;;
+	esac
+fi
+[ -n "$version" ] || version=$(uname -r)
+
+mkdir -p "$(dirname "$IMAGE")"
+if command -v dracut >/dev/null 2>&1; then
+	exec dracut --force --add kmorph --kver "$version" "$IMAGE"
+elif command -v mkinitramfs >/dev/null 2>&1; then
+	KMORPH_IMAGE=1 exec mkinitramfs -o "$IMAGE" "$version"
+else
+	echo "kmorph-mkimage: neither dracut nor mkinitramfs found" >&2
+	exit 1
+fi

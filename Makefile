@@ -72,10 +72,27 @@ check: $(TEST_BINS)
 	@for t in $(TEST_BINS); do echo "== $$t"; $$t || exit 1; done
 	@echo "all tests passed"
 
+DRACUTDIR = $(PREFIX)/lib/dracut/modules.d/99kmorph
+LIBDIR    = $(PREFIX)/lib/kmorph
+UNITDIR   = $(PREFIX)/lib/systemd/system
+KINSTDIR  = $(PREFIX)/lib/kernel/install.d
+POSTINSTDIR = /etc/kernel/postinst.d
+IRTDIR    = $(PREFIX)/share/initramfs-tools
+
 install: all
 	$(INSTALL) -d $(DESTDIR)$(PREFIX)/bin $(DESTDIR)/etc/kmorph
 	$(INSTALL) -m 0755 $(BIN)/kmorph $(KMORPHD_INSTALL) $(DESTDIR)$(PREFIX)/bin/
 	$(INSTALL) -m 0644 kmorph.conf.example $(DESTDIR)/etc/kmorph/
+	$(INSTALL) -d $(DESTDIR)$(DRACUTDIR) $(DESTDIR)$(LIBDIR) $(DESTDIR)$(UNITDIR) $(DESTDIR)$(KINSTDIR) $(DESTDIR)$(POSTINSTDIR)
+	$(INSTALL) -d $(DESTDIR)$(IRTDIR)/hooks $(DESTDIR)$(IRTDIR)/scripts/init-premount
+	$(INSTALL) -m 0755 dist/dracut/99kmorph/module-setup.sh $(DESTDIR)$(DRACUTDIR)/
+	$(INSTALL) -m 0644 dist/dracut/99kmorph/kmorphd-initrd.service $(DESTDIR)$(DRACUTDIR)/
+	$(INSTALL) -m 0755 dist/dracut/kmorph-mkimage $(DESTDIR)$(LIBDIR)/
+	$(INSTALL) -m 0644 dist/systemd/kmorph.service $(DESTDIR)$(UNITDIR)/
+	$(INSTALL) -m 0755 dist/kernel-install/60-kmorph.install $(DESTDIR)$(KINSTDIR)/
+	$(INSTALL) -m 0755 dist/kernel-install/60-kmorph.install $(DESTDIR)$(POSTINSTDIR)/zz-kmorph
+	$(INSTALL) -m 0755 dist/initramfs-tools/hooks/kmorph $(DESTDIR)$(IRTDIR)/hooks/
+	$(INSTALL) -m 0755 dist/initramfs-tools/scripts/init-premount/kmorph $(DESTDIR)$(IRTDIR)/scripts/init-premount/
 
 clean:
 	rm -rf $(BUILD)
