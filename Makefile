@@ -11,7 +11,7 @@ LDFLAGS += -static
 endif
 
 WARN     = -Wall -Wextra -Werror -Wshadow -Wmissing-prototypes
-CPPFLAGS = -D_GNU_SOURCE -Iinclude -Ilib/fdt
+CPPFLAGS = -D_GNU_SOURCE -Iinclude -Ilib/fdt -DKMORPHD_PATH='"$(PREFIX)/bin/kmorphd"'
 ALL_CFLAGS = -std=gnu11 $(CFLAGS) $(CPPFLAGS)
 
 BUILD = build
@@ -31,7 +31,7 @@ TEST_BINS    = $(TEST_SRCS:tests/%.c=$(BUILD)/tests/%)
 LIBKMORPH = $(BUILD)/libkmorph.a
 BIN       = $(BUILD)/bin
 
-all: $(BIN)/kmorphd $(BIN)/kmorph
+all: $(BIN)/kmorphd $(BIN)/kmorph static-kmorphd
 
 $(BIN)/kmorphd: $(BUILD)/kmorphd/main.o $(KMORPHD_OBJS) $(LIBKMORPH)
 	@mkdir -p $(dir $@)
@@ -40,6 +40,18 @@ $(BIN)/kmorphd: $(BUILD)/kmorphd/main.o $(KMORPHD_OBJS) $(LIBKMORPH)
 $(BIN)/kmorph: $(BUILD)/kmorph/main.o $(KMORPH_OBJS) $(LIBKMORPH)
 	@mkdir -p $(dir $@)
 	$(CC) $(LDFLAGS) -o $@ $^
+
+# The successor runs kmorphd from an image with no libc, so the installed
+# kmorphd is static, built with musl in its own directory to keep the
+# objects apart from the host build the tests link against.
+ifeq ($(STATIC),1)
+KMORPHD_INSTALL = $(BIN)/kmorphd
+static-kmorphd:
+else
+KMORPHD_INSTALL = $(BUILD)/static/bin/kmorphd
+static-kmorphd:
+	$(MAKE) BUILD=$(BUILD)/static STATIC=1 $(BUILD)/static/bin/kmorphd
+endif
 
 $(LIBKMORPH): $(LIB_OBJS) $(FDT_OBJS)
 	$(AR) rcs $@ $^
@@ -62,7 +74,7 @@ check: $(TEST_BINS)
 
 install: all
 	$(INSTALL) -d $(DESTDIR)$(PREFIX)/bin $(DESTDIR)/etc/kmorph
-	$(INSTALL) -m 0755 $(BIN)/kmorph $(BIN)/kmorphd $(DESTDIR)$(PREFIX)/bin/
+	$(INSTALL) -m 0755 $(BIN)/kmorph $(KMORPHD_INSTALL) $(DESTDIR)$(PREFIX)/bin/
 	$(INSTALL) -m 0644 kmorph.conf.example $(DESTDIR)/etc/kmorph/
 
 clean:
@@ -71,4 +83,4 @@ clean:
 -include $(LIB_OBJS:.o=.d) $(KMORPHD_OBJS:.o=.d) $(KMORPH_OBJS:.o=.d)
 -include $(BUILD)/kmorphd/main.d $(BUILD)/kmorph/main.d
 
-.PHONY: all check install clean
+.PHONY: all check static-kmorphd install clean

@@ -134,6 +134,29 @@ static void load_reads_a_file(void)
 	CHECK(strstr(err, "/nonexistent/kmorph.conf") != NULL);
 }
 
+static void parsed_text_is_kept_verbatim(void)
+{
+	struct kmorph_config c;
+	const char *text = "# a comment\ncpus = 1\n\nmemory = 128MB\n";
+	char err[128];
+
+	CHECK_EQ(config_parse(text, &c, err, sizeof(err)), 0);
+	CHECK_STREQ(c.text, text);
+	config_free(&c);
+	CHECK(c.text == NULL);
+}
+
+static void console_needs_a_login_program(void)
+{
+	struct kmorph_config c;
+	char err[128];
+
+	CHECK_EQ(config_parse("console = ttyS0\n", &c, err, sizeof(err)), -EINVAL);
+	CHECK_STREQ(err, "console needs console_login");
+	CHECK_EQ(config_parse("console = ttyS0\nconsole_login = /bin/sh\n", &c, err, sizeof(err)), 0);
+	config_free(&c);
+}
+
 TEST_MAIN({
 	RUN(defaults_apply_when_keys_are_absent);
 	RUN(parses_every_key_with_comments_and_spacing);
@@ -143,4 +166,6 @@ TEST_MAIN({
 	RUN(line_without_equals_is_an_error);
 	RUN(probe_timeouts_must_be_positive);
 	RUN(load_reads_a_file);
+	RUN(parsed_text_is_kept_verbatim);
+	RUN(console_needs_a_login_program);
 })

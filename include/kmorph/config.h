@@ -7,6 +7,7 @@
 #include "kmorph/parse.h"
 
 #define KMORPH_CONFIG_PATH "/etc/kmorph/kmorph.conf"
+#define KMORPH_INITRD_PATH "/var/lib/kmorph/successor.img"
 
 struct kmorph_config {
 	/* Successor to arm (predecessor side) */
@@ -30,7 +31,8 @@ struct kmorph_config {
 	/* Console the successor takes over: a serial line it is armed with */
 	char *console;			/* e.g. ttyS0 */
 	unsigned int console_baud;
-	char *console_login;		/* program getty runs instead of login, if set */
+	char *console_login;		/* program run on the line; required with console */
+	char *text;			/* the parsed text, as arm forwards it to the successor */
 };
 
 int config_parse(const char *text, struct kmorph_config *c, char *err, size_t errlen);

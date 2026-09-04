@@ -145,6 +145,15 @@ int config_parse(const char *text, struct kmorph_config *c, char *err, size_t er
 	}
 
 	free(copy);
+	if (!ret && c->console && !c->console_login) {
+		snprintf(err, errlen, "console needs console_login");
+		ret = -EINVAL;
+	}
+	if (!ret) {
+		c->text = strdup(text);
+		if (!c->text)
+			ret = -ENOMEM;
+	}
 	if (ret)
 		config_free(c);
 	return ret;
@@ -177,5 +186,6 @@ void config_free(struct kmorph_config *c)
 	free(c->dump);
 	free(c->console);
 	free(c->console_login);
+	free(c->text);
 	memset(c, 0, sizeof(*c));
 }

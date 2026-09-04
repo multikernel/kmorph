@@ -26,47 +26,54 @@ directly and needs no other tool.
   `CONFIG_MULTIKERNEL_VSOCKETS=y`, with the host tree interface (the
   `multikernel,host-tree` node in instance-create). x86-64 only.
   `CONFIG_CRASH_DUMP=y` for registers and VMCOREINFO in the dump.
-- An initramfs for the successor that starts `kmorphd` from its init and
-  contains `getty` if the serial console is to be recovered. A static
-  build of kmorphd needs nothing else from the image.
+- Nothing in the successor image beyond what `kmorph init` packs, unless
+  the serial console is wanted: then `console_login` names a static
+  program, busybox's `sh` for instance, and kmorph copies it in. The
+  successor kernel needs the serial driver, the multikernel filesystem
+  and the vsock transport built in, since the image carries no modules.
 - On the predecessor, root, and `gzip`, `xz`, `zstd` or `lz4` if the
   kernel image is a bzImage rather than an ELF vmlinux.
 
 ## Building
 
 ```bash
-make                 # build/bin/kmorph and build/bin/kmorphd
-make STATIC=1        # static binaries (musl), for the successor initramfs
+make                 # build/bin/kmorph, build/bin/kmorphd and a static kmorphd
 make check           # unit tests
 make install         # binaries to $(PREFIX)/bin, default /usr/local
 ```
 
-The only dependencies are libc and the libfdt sources vendored under
-lib/fdt. `make install` honours `PREFIX` and `DESTDIR` and puts an annotated
-`kmorph.conf.example` in `/etc/kmorph`.
-Copy `kmorph` to the predecessor and `kmorphd` into the successor
-initramfs.
+The dependencies are libc, musl-gcc for the static kmorphd the successor
+runs, and the libfdt sources vendored under lib/fdt. `make install`
+honours `PREFIX` and `DESTDIR` and puts an annotated `kmorph.conf.example`
+in `/etc/kmorph`.
 
 ## Quick start
 
-1. Write `/etc/kmorph/kmorph.conf` on the predecessor and put the same file
-   at `/etc/kmorph/kmorph.conf` in the successor initramfs:
+1. Write `/etc/kmorph/kmorph.conf` on the predecessor:
 
    ```ini
    cpus    = 1
    memory  = 128MB
    kernel  = /boot/vmlinuz
-   initrd  = /boot/successor.img
    cmdline = earlyprintk=serial,ttyS0,115200 keep_bootcon
    devices = 0000:09:00.0
    console = ttyS0
+   console_login = /usr/local/lib/kmorph/sh
    ```
 
-2. Have the successor initramfs start the daemon:
+   The login program here is a static busybox copied under the name `sh`,
+   so that it runs as a shell.
 
-   ```sh
-   /bin/kmorphd --config /etc/kmorph/kmorph.conf
+2. Build the successor image, once per kmorph install:
+
    ```
+   # kmorph init
+   kmorph: successor image written to /var/lib/kmorph/successor.img (2563028 bytes)
+   ```
+
+   It holds kmorphd as the image's init and the login program. `kmorph arm`
+   adds the config to it each time, so the image never goes stale when the
+   config changes.
 
 3. Arm on the predecessor and check:
 
@@ -99,13 +106,13 @@ programs read the same file; each uses the keys for its side. `kernel`,
 | `cpus` | | CPUs for the successor, as physical ids the kernel uses (APIC ids), e.g. `1` or `12-15,20`. |
 | `memory` | | Memory for the successor, e.g. `128MB`, `4GB`. |
 | `kernel` | | Kernel image: an ELF vmlinux, or a bzImage from which the vmlinux is extracted. |
-| `initrd` | | Initramfs for the successor. |
+| `initrd` | `/var/lib/kmorph/successor.img` | Initramfs for the successor; the default is what `kmorph init` writes. kmorph appends the config to whichever image is used. |
 | `cmdline` | | Kernel command line for the successor. See [Successor console](#successor-console). With `dump` set, kmorph adds `iomem=relaxed`, which the successor needs to read the predecessor's memory through `/dev/mem` on kernels built with `IO_STRICT_DEVMEM`. |
 | `devices` | | PCI functions handed to the successor, comma separated, e.g. `0000:09:00.0`. Give it its own NIC and disk. |
 | `machine_cpus` | from the MADT | Every CPU on the machine. Set only on a machine without ACPI. |
 | `console` | | Serial line the successor takes over after the crash, e.g. `ttyS0`. |
 | `console_baud` | `115200` | Speed of that line. |
-| `console_login` | | Program the getty runs instead of `login`, e.g. `/bin/sh` for an image without accounts. |
+| `console_login` | | Program run on the serial line after the takeover, required with `console`. With the default image it must be a static executable, which `kmorph init` copies in; a user image carries its own. |
 
 ### Detection and takeover (used by kmorphd)
 
@@ -126,10 +133,18 @@ with no user space involved, so only silence counts, and only for
 ### kmorph, on the predecessor
 
 ```
+kmorph init   [--config PATH]
 kmorph arm    [--config PATH]
 kmorph disarm [--config PATH]
 kmorph status [--config PATH]
 ```
+
+**init** writes the successor image, `/var/lib/kmorph/successor.img`: an
+initramfs holding the kmorphd installed beside kmorph as its init and, when
+`console` is set, the `console_login` program at its own path. Both must be
+static executables, since the image has no libc; init refuses a dynamic one.
+Run it once after installing kmorph and again after upgrading it or changing
+`console_login`. The config is not in the image.
 
 **arm** prepares the machine and boots the successor. If the machine has no
 multikernel pool yet, kmorph mounts `/sys/fs/multikernel`, and creates a
@@ -137,8 +152,11 @@ pool holding the successor's CPUs, its memory plus one memory block of
 headroom for the kernel's own use, its devices, and the serial device when
 `console` is set. If a pool exists, kmorph uses it and adds any configured
 PCI device the pool lacks. It then creates the instance, loads the kernel
-and initramfs, and boots the successor. The whole command takes about a
-second.
+and the image with the config appended to it, and boots the successor. The
+image is the one init wrote unless `initrd` names another; the config is
+appended either way, as a second cpio archive the kernel unpacks after the
+first, so the successor always boots with the config arm just read. The
+whole command takes about a second.
 
 **disarm** halts the successor, unloads its image and removes the instance,
 returning its resources to the pool.
@@ -158,8 +176,11 @@ kmorphd [--config PATH] [--foreground]
 ```
 
 kmorphd refuses to run in a kernel that was not armed by kmorph, since it
-finds nothing to take over. It daemonises unless `--foreground` is given,
-logs to the kernel log, and writes its state to `/run/kmorph/state`:
+finds nothing to take over. As the image's init, which is how `kmorph init`
+packs it, it mounts proc, sysfs, devtmpfs and a tmpfs on `/run`, stays in
+the foreground and reaps orphans. Started by another init it daemonises
+unless `--foreground` is given. Either way it logs to the kernel log and
+writes its state to `/run/kmorph/state`:
 
 ```
 TAKEN_OVER predecessor=silent last_probe=181ms error=0
@@ -193,7 +214,7 @@ FENCE_FAILED, FENCED and TAKEN_OVER.
    `IO_STRICT_DEVMEM` does not get in the way, and the successor must not be
    booted locked down. If the dump fails, the memory stays unclaimed and
    readable rather than being destroyed.
-5. **Console.** With `console` set, a getty is started on the serial line.
+5. **Console.** With `console` set, the login program is started on the serial line.
 
 Takeover is one-shot. Afterwards the successor is the machine's kernel and
 is itself unprotected until an operator arms a new successor.
@@ -244,9 +265,10 @@ with `dump = /tmp/vmcore`. Zero pages are sent as zeros on a FIFO.
 When `console` names a serial line, `kmorph arm` places the legacy serial
 device in the pool and hands it to the successor, whose kernel registers it
 at boot. After the takeover kmorphd switches the line to polling, since the
-successor has no interrupt routing for it, and keeps a getty on it, so the
-serial console that showed the predecessor now shows the successor's shell.
-Set `console_login` to `/bin/sh` on an image without user accounts.
+successor has no interrupt routing for it, and keeps the login program on
+it, so the serial console that showed the predecessor now shows the
+successor's shell. With the default image, `console_login` must be a static
+executable, since the image carries no libc.
 
 Give the successor an early serial console on the same line in its
 `cmdline`, `earlyprintk=serial,ttyS0,115200 keep_bootcon`, so its kernel
@@ -293,7 +315,8 @@ halt and fence, and vsock for liveness.
    yet, a baseline written to
    `/sys/fs/multikernel/device_tree` creates one first.
 2. **Load.** `kexec_file_load()` in multikernel mode loads the kernel and
-   initramfs for that instance.
+   the initramfs for that instance. The initramfs is the image with the
+   config appended, assembled in memory; nothing on disk is changed.
 3. **Exec.** The multikernel `reboot()` command boots it. At that moment the
    predecessor kernel writes the successor's boot device tree: the host tree
    goes into the successor's `/chosen` as it was given, and beside it the

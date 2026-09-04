@@ -6,46 +6,69 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/wait.h>
+#include <termios.h>
 #include <unistd.h>
 
 #include "kmorph/log.h"
 #include "kmorph/serial.h"
 #include "console.h"
 
-int console_getty_argv(const char *tty, unsigned int baud, const char *login,
-		       char **argv, int max)
-{
-	char speed[16];
-	int n = 0;
+static pid_t console_start_supervisor(const char *tty, unsigned int baud, const char *login);
 
-	if (max < (login ? 9 : 6))
-		return -ENOSPC;
-	snprintf(speed, sizeof(speed), "%u", baud);
-	argv[n++] = strdup("getty");
-	argv[n++] = strdup("-L");
-	if (login) {
-		argv[n++] = strdup("-n");
-		argv[n++] = strdup("-l");
-		argv[n++] = strdup(login);
-	}
-	argv[n++] = strdup(speed);
-	argv[n++] = strdup(tty);
-	argv[n++] = strdup("vt100");
-	argv[n] = NULL;
-	return n;
+int console_line_attrs(struct termios *t, unsigned int baud)
+{
+	static const struct { unsigned int rate; speed_t code; } speeds[] = {
+		{ 9600, B9600 }, { 19200, B19200 }, { 38400, B38400 },
+		{ 57600, B57600 }, { 115200, B115200 }, { 230400, B230400 },
+	};
+	size_t i;
+
+	for (i = 0; i < sizeof(speeds) / sizeof(speeds[0]); i++)
+		if (speeds[i].rate == baud)
+			break;
+	if (i == sizeof(speeds) / sizeof(speeds[0]))
+		return -EINVAL;
+	memset(t, 0, sizeof(*t));
+	cfsetispeed(t, speeds[i].code);
+	cfsetospeed(t, speeds[i].code);
+	t->c_cflag |= CS8 | CREAD | HUPCL | CLOCAL;
+	t->c_iflag = ICRNL;
+	t->c_oflag = OPOST | ONLCR;
+	t->c_lflag = ISIG | ICANON | ECHO | ECHOE | ECHOK | IEXTEN;
+	t->c_cc[VINTR] = 3;
+	t->c_cc[VERASE] = 0177;
+	t->c_cc[VKILL] = 025;
+	t->c_cc[VEOF] = 4;
+	t->c_cc[VMIN] = 1;
+	return 0;
 }
 
-void console_getty_argv_free(char **argv)
+/* The child: open the line as its terminal and become the login program. */
+static void run_login(const char *tty, unsigned int baud, const char *login)
 {
-	int i;
+	struct termios t;
+	char path[64];
+	int fd;
 
-	for (i = 0; argv[i]; i++)
-		free(argv[i]);
+	snprintf(path, sizeof(path), "/dev/%s", tty);
+	setsid();
+	fd = open(path, O_RDWR | O_NOCTTY);
+	if (fd < 0)
+		_exit(1);
+	if (!console_line_attrs(&t, baud))
+		tcsetattr(fd, TCSANOW, &t);
+	ioctl(fd, TIOCSCTTY, 0);
+	dup2(fd, STDIN_FILENO);
+	dup2(fd, STDOUT_FILENO);
+	dup2(fd, STDERR_FILENO);
+	if (fd > STDERR_FILENO)
+		close(fd);
+	setenv("TERM", "vt100", 1);
+	execl(login, login, (char *)NULL);
+	_exit(127);
 }
 
-static pid_t console_start_getty(const char *tty, unsigned int baud, const char *login);
-
-static void supervise(char **argv)
+static void supervise(const char *tty, unsigned int baud, const char *login)
 {
 	sigset_t mask;
 
@@ -55,11 +78,8 @@ static void supervise(char **argv)
 		pid_t pid = fork();
 		int status;
 
-		if (pid == 0) {
-			setsid();
-			execvp(argv[0], argv);
-			_exit(127);
-		}
+		if (pid == 0)
+			run_login(tty, baud, login);
 		if (pid < 0 || waitpid(pid, &status, 0) < 0)
 			_exit(1);
 		if (WIFEXITED(status) && WEXITSTATUS(status) == 127)
@@ -91,28 +111,26 @@ int console_poll_mode(const char *tty)
 
 pid_t console_start(const char *tty, unsigned int baud, const char *login)
 {
+	struct termios t;
 	int ret = console_poll_mode(tty);
 
 	if (ret)
 		log_warn("console: cannot switch %s to polling: %s", tty, strerror(-ret));
 	else
 		log_info("console: %s driven by polling", tty);
-	return console_start_getty(tty, baud, login);
+	if (console_line_attrs(&t, baud))
+		log_warn("console: %u baud is not a termios rate; the line keeps its speed", baud);
+	return console_start_supervisor(tty, baud, login);
 }
 
-static pid_t console_start_getty(const char *tty, unsigned int baud, const char *login)
+static pid_t console_start_supervisor(const char *tty, unsigned int baud, const char *login)
 {
-	char *argv[10];
-	pid_t pid;
+	pid_t pid = fork();
 
-	if (console_getty_argv(tty, baud, login, argv, 10) < 0)
-		return -ENOSPC;
-	pid = fork();
 	if (pid == 0)
-		supervise(argv);
-	console_getty_argv_free(argv);
+		supervise(tty, baud, login);
 	if (pid < 0)
 		return -errno;
-	log_info("console: getty supervisor on %s at %u baud (pid %d)", tty, baud, pid);
+	log_info("console: supervising %s on %s at %u baud (pid %d)", login, tty, baud, pid);
 	return pid;
 }

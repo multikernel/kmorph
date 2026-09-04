@@ -2,17 +2,17 @@
 #define KMORPHD_CONSOLE_H
 
 #include <sys/types.h>
+#include <termios.h>
 
 /*
  * After a takeover the successor owns the serial line it was armed with.
- * A getty on it gives the operator the console back; a supervisor keeps
- * the getty respawning.
+ * kmorphd puts the configured login program on it, doing the little a
+ * getty would: speed, line discipline, controlling terminal. A
+ * supervisor keeps the program respawning.
  */
 
-/* Fill argv for busybox/agetty-style getty: returns argc, or -ENOSPC. */
-int console_getty_argv(const char *tty, unsigned int baud, const char *login,
-		       char **argv, int max);
-void console_getty_argv_free(char **argv);
+/* 8N1, local, cooked, at baud; -EINVAL for a rate termios has no code for. */
+int console_line_attrs(struct termios *t, unsigned int baud);
 
 /*
  * Drive the line by polling: a successor has no interrupt routing for

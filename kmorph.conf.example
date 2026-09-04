@@ -10,8 +10,8 @@
 # Kernel image: an ELF vmlinux or a bzImage.
 kernel  = /boot/vmlinuz
 
-# Initramfs for the successor. It must contain kmorphd.
-initrd  = /boot/successor.img
+# Initramfs for the successor. Default: the image 'kmorph init' writes.
+#initrd = /var/lib/kmorph/successor.img
 
 # CPUs for the successor, as physical (APIC) ids, e.g. 1 or 12-15,20.
 cpus    = 1

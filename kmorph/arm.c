@@ -3,13 +3,16 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/mman.h>
 #include <unistd.h>
 
+#include "kmorph/cpio.h"
 #include "kmorph/crashinfo.h"
 #include "kmorph/dt.h"
 #include "kmorph/log.h"
 #include "kmorph/mksys.h"
 #include "kmorph/pci.h"
+#include "kmorph/file.h"
 #include "kmorph/host_tree.h"
 #include "kmorph/iomem.h"
 #include "kmorph/madt.h"
@@ -30,6 +33,7 @@ const struct arm_hooks arm_default_hooks = {
 	.vmcoreinfo_path = VMCOREINFO_PATH,
 	.cpu_root = CPU_SYSFS_ROOT,
 	.kcore_path = KCORE_PATH,
+	.default_initrd = KMORPH_INITRD_PATH,
 };
 
 static bool strlist_has(const struct strlist *l, const char *s)
@@ -345,9 +349,70 @@ static char *successor_cmdline(const struct kmorph_config *cfg)
 	return out;
 }
 
-static int load_and_exec(const struct kmorph_config *cfg, const struct arm_hooks *h, int id)
+static int write_all(int fd, const void *buf, size_t len)
 {
-	int kernel_fd, initrd_fd = -1, ret;
+	const char *p = buf;
+
+	while (len) {
+		ssize_t n = write(fd, p, len);
+
+		if (n < 0) {
+			if (errno == EINTR)
+				continue;
+			return -errno;
+		}
+		p += n;
+		len -= n;
+	}
+	return 0;
+}
+
+/* The image, then the one thing only arm knows: the config. */
+static int successor_initrd(const struct kmorph_config *cfg, const struct arm_hooks *h)
+{
+	const char *path = cfg->initrd ? cfg->initrd : h->default_initrd;
+	struct cpio extra = CPIO_INIT;
+	void *image;
+	size_t len;
+	int fd, ret;
+
+	ret = file_read(path, &image, &len);
+	if (ret) {
+		log_err("cannot read successor image %s: %s%s", path, strerror(-ret),
+			cfg->initrd ? "" : "; 'kmorph init' builds it");
+		return ret;
+	}
+	ret = cpio_add_file(&extra, KMORPH_CONFIG_PATH, cfg->text, strlen(cfg->text), 0644);
+	if (!ret)
+		ret = cpio_finish(&extra);
+	if (ret)
+		goto out;
+
+	fd = memfd_create("kmorph-initrd", MFD_CLOEXEC);
+	if (fd < 0) {
+		ret = -errno;
+		goto out;
+	}
+	ret = write_all(fd, image, len);
+	if (!ret)
+		ret = write_all(fd, extra.data, extra.len);
+	if (ret) {
+		log_err("cannot assemble the successor initrd: %s", strerror(-ret));
+		close(fd);
+		goto out;
+	}
+	lseek(fd, 0, SEEK_SET);
+	ret = fd;
+out:
+	free(image);
+	cpio_free(&extra);
+	return ret;
+}
+
+static int load_and_exec(const struct kmorph_config *cfg, const struct arm_hooks *h, int id,
+			 int initrd_fd)
+{
+	int kernel_fd, ret;
 	bool expected;
 	char *cmdline;
 
@@ -356,30 +421,17 @@ static int load_and_exec(const struct kmorph_config *cfg, const struct arm_hooks
 		log_err("cannot open kernel %s: %s", cfg->kernel, strerror(-kernel_fd));
 		return kernel_fd;
 	}
-	if (cfg->initrd) {
-		initrd_fd = open(cfg->initrd, O_RDONLY | O_CLOEXEC);
-		if (initrd_fd < 0) {
-			ret = -errno;
-			log_err("cannot open initrd %s: %s", cfg->initrd, strerror(-ret));
-			close(kernel_fd);
-			return ret;
-		}
-	}
 
 	expected = cfg->cmdline || cfg->dump;
 	cmdline = successor_cmdline(cfg);
 	if (!cmdline && expected) {
 		close(kernel_fd);
-		if (initrd_fd >= 0)
-			close(initrd_fd);
 		log_err("cannot build the successor's command line: %s", strerror(ENOMEM));
 		return -ENOMEM;
 	}
 
 	ret = h->kexec_load(kernel_fd, initrd_fd, cmdline, id);
 	close(kernel_fd);
-	if (initrd_fd >= 0)
-		close(initrd_fd);
 	free(cmdline);
 	if (ret) {
 		log_err("kexec_file_load failed: %s", strerror(-ret));
@@ -395,7 +447,7 @@ static int load_and_exec(const struct kmorph_config *cfg, const struct arm_hooks
 int arm_run(const struct kmorph_config *cfg, const struct mkfs *fs, const struct arm_hooks *h)
 {
 	uint32_t id;
-	int ret;
+	int initrd_fd, ret;
 
 	if (!cfg->kernel || !cfg->cpus.count || !cfg->memory) {
 		log_err("config needs kernel, cpus and memory to arm a successor");
@@ -405,23 +457,28 @@ int arm_run(const struct kmorph_config *cfg, const struct mkfs *fs, const struct
 	ret = ensure_pool(cfg, fs, h);
 	if (ret)
 		return ret;
+	initrd_fd = successor_initrd(cfg, h);
+	if (initrd_fd < 0)
+		return initrd_fd;
 	ret = create_instance(cfg, fs, h);
 	if (ret)
-		return ret;
+		goto out;
 	ret = mkfs_instance_id(fs, cfg->name, &id);
 	if (ret) {
 		log_err("instance %s has no id after creation: %s", cfg->name, strerror(-ret));
-		return ret;
+		goto out;
 	}
 	log_info("instance %s created with id %u", cfg->name, id);
 
-	ret = load_and_exec(cfg, h, id);
+	ret = load_and_exec(cfg, h, id, initrd_fd);
 	if (ret) {
 		log_err("successor left in place; run 'kmorph disarm' to remove it");
-		return ret;
+		goto out;
 	}
 	log_info("successor %s armed", cfg->name);
-	return 0;
+out:
+	close(initrd_fd);
+	return ret;
 }
 
 int disarm_run(const struct kmorph_config *cfg, const struct mkfs *fs, const struct arm_hooks *h)

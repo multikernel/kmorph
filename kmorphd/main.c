@@ -31,6 +31,7 @@
 #include "kmorph/request.h"
 #include "kmorph/vsock.h"
 #include "console.h"
+#include "init.h"
 #include "ops.h"
 #include "takeover.h"
 
@@ -41,6 +42,7 @@
 #define STATE_PATH STATE_DIR "/state"
 
 struct daemon {
+	bool init;
 	struct kmorph_config cfg;
 	struct ops ops;
 	struct takeover tk;
@@ -246,13 +248,15 @@ static int open_timer(uint64_t interval_ms)
 	return fd;
 }
 
-static int open_signals(void)
+static int open_signals(bool init)
 {
 	sigset_t mask;
 
 	sigemptyset(&mask);
 	sigaddset(&mask, SIGTERM);
 	sigaddset(&mask, SIGINT);
+	if (init)
+		sigaddset(&mask, SIGCHLD);
 	if (sigprocmask(SIG_BLOCK, &mask, NULL) < 0)
 		return -errno;
 	return signalfd(-1, &mask, SFD_CLOEXEC);
@@ -294,7 +298,7 @@ static int daemon_setup(struct daemon *d)
 
 	d->epfd = epoll_create1(EPOLL_CLOEXEC);
 	d->timer_fd = open_timer(d->cfg.probe_interval_ms);
-	d->signal_fd = open_signals();
+	d->signal_fd = open_signals(d->init);
 	d->listen_fd = open_listener();
 	if (d->epfd < 0 || d->timer_fd < 0 || d->signal_fd < 0)
 		return -errno;
@@ -332,6 +336,19 @@ static void daemon_run(struct daemon *d)
 		else if (ev.data.fd == d->listen_fd)
 			on_connection(d);
 		else if (ev.data.fd == d->signal_fd) {
+			struct signalfd_siginfo si;
+
+			if (read(d->signal_fd, &si, sizeof(si)) != sizeof(si))
+				continue;
+			if (si.ssi_signo == SIGCHLD) {
+				init_reap();
+				continue;
+			}
+			/* PID 1 must not exit: the kernel panics without an init. */
+			if (d->init) {
+				log_warn("ignoring signal %u as init", si.ssi_signo);
+				continue;
+			}
 			log_info("terminating");
 			return;
 		}
@@ -391,9 +408,14 @@ int main(int argc, char **argv)
 	if (optind != argc)
 		usage();
 
+	/* As init nothing is mounted yet, not even the /dev the kernel log is reached through. */
+	memset(&d, 0, sizeof(d));
+	d.init = getpid() == 1;
+	ret = d.init ? init_mount_filesystems(&init_default_env) : 0;
 	log_init("kmorphd", STDERR_FILENO, -1);
 	log_open_kmsg();
-	memset(&d, 0, sizeof(d));
+	if (ret)
+		log_warn("init: some filesystems did not mount: %s", strerror(-ret));
 
 	ret = config_load(config_path, &d.cfg, err, sizeof(err));
 	if (ret == -ENOENT) {
@@ -405,7 +427,7 @@ int main(int argc, char **argv)
 		return 1;
 	}
 
-	if (!foreground)
+	if (!foreground && !d.init)
 		daemonize();
 
 	ret = daemon_setup(&d);

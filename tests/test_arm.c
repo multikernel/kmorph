@@ -7,17 +7,23 @@
 #include "fdt_helpers.h"
 #include "kmorph/file.h"
 #include "kmorph/fdtutil.h"
+#include "cpio_helpers.h"
+#include "elf_helpers.h"
+#include "kmorph/cpio.h"
 #include "arm.h"
 
 static char sysfs[] = "/tmp/kmorph-test-arm-XXXXXX";
 static char pci_root[600], block_size[600], madt_path[600], iomem_path[600];
 static char vmcoreinfo_path[600], cpu_root[600], kcore_path[600];
+static char image_path[600], login_path[600];
 
 struct calls {
 	char seq[32];
 	int loaded_id, exec_id, halt_id, unloaded_id;
 	int kernel_fd, initrd_fd;
 	char cmdline[64];
+	unsigned char initrd[65536];
+	size_t initrd_len;
 };
 
 static struct calls calls;
@@ -43,6 +49,14 @@ static int fake_kexec_load(int kernel_fd, int initrd_fd, const char *cmdline, in
 	calls.kernel_fd = kernel_fd;
 	calls.initrd_fd = initrd_fd;
 	calls.loaded_id = mk_id;
+	calls.initrd_len = 0;
+	if (initrd_fd >= 0) {
+		ssize_t n;
+
+		lseek(initrd_fd, 0, SEEK_SET);
+		n = read(initrd_fd, calls.initrd, sizeof(calls.initrd));
+		calls.initrd_len = n > 0 ? (size_t)n : 0;
+	}
 	snprintf(calls.cmdline, sizeof(calls.cmdline), "%s", cmdline ? cmdline : "");
 	return 0;
 }
@@ -64,6 +78,7 @@ static const struct arm_hooks hooks = {
 	.vmcoreinfo_path = vmcoreinfo_path,
 	.cpu_root = cpu_root,
 	.kcore_path = kcore_path,
+	.default_initrd = image_path,
 };
 
 static void put(const char *rel, const void *data, size_t len)
@@ -123,6 +138,46 @@ static void put_pci_device(const char *id, const char *vendor, const char *devic
 }
 
 
+static const char image_init[] = "#!/bin/sh\necho init\n";
+static unsigned char image[512];
+static size_t image_len;
+
+/* A static executable standing in for the console's login program. */
+static void put_login(void)
+{
+	unsigned char elf[256];
+	size_t len = fake_elf64(elf, 0);
+
+	CHECK_EQ(file_write(login_path, elf, len), 0);
+}
+
+static void put_image(void)
+{
+	struct cpio c = CPIO_INIT;
+
+	CHECK_EQ(cpio_add_file(&c, "init", image_init, sizeof(image_init) - 1, 0755), 0);
+	CHECK_EQ(cpio_finish(&c), 0);
+	CHECK(c.len <= sizeof(image));
+	memcpy(image, c.data, c.len);
+	image_len = c.len;
+	CHECK_EQ(file_write(image_path, image, image_len), 0);
+	cpio_free(&c);
+}
+
+/* The archive arm appended after the image; returns 1 with the entry named, or 0. */
+static int appended_entry(const char *name, struct cpio_entry *e)
+{
+	size_t off = image_len;
+	int ret;
+
+	CHECK(calls.initrd_len > image_len);
+	CHECK(memcmp(calls.initrd, image, image_len) == 0);
+	while ((ret = cpio_next(calls.initrd, calls.initrd_len, &off, e)) == 1)
+		if (!strcmp(e->name, name))
+			return 1;
+	return 0;
+}
+
 static void put_madt(const uint8_t *apic_ids, size_t n)
 {
 	unsigned char t[128];
@@ -151,6 +206,8 @@ static void setup(void)
 	config_parse("name = successor\ncpus = 12-15\nmemory = 4GB\n"
 		     "kernel = /boot/vmlinuz\ncmdline = quiet\n", &cfg, err, sizeof(err));
 	memset(&calls, 0, sizeof(calls));
+	put_image();
+	put_login();
 	mkdir_rel("overlays");
 	put("overlays/new", "", 0);
 	mkdir_rel("overlays/tx_7");
@@ -180,7 +237,14 @@ static void arm_creates_loads_and_execs(void)
 	CHECK_EQ(arm_run(&cfg, &fs, &hooks), 0);
 	CHECK_STREQ(calls.seq, "KLE");
 	CHECK_EQ(calls.kernel_fd, 42);
-	CHECK_EQ(calls.initrd_fd, -1);
+	{
+		struct cpio_entry e;
+
+		CHECK(calls.initrd_fd >= 0);
+		CHECK_EQ(appended_entry("etc/kmorph/kmorph.conf", &e), 1);
+		CHECK_EQ(e.len, strlen(cfg.text));
+		CHECK(memcmp(e.data, cfg.text, e.len) == 0);
+	}
 	CHECK_EQ(calls.loaded_id, 5);
 	CHECK_EQ(calls.exec_id, 5);
 	CHECK_STREQ(calls.cmdline, "quiet");
@@ -441,6 +505,17 @@ static void arm_refuses_to_proceed_without_a_host_tree(void)
 	config_free(&cfg);
 }
 
+static void parse_console_config(void)
+{
+	char text[1024], err[64];
+
+	config_free(&cfg);
+	snprintf(text, sizeof(text),
+		 "cpus = 12\nmemory = 1GB\nkernel = /boot/vmlinuz\nconsole = ttyS0\nconsole_login = %s\n",
+		 login_path);
+	CHECK_EQ(config_parse(text, &cfg, err, sizeof(err)), 0);
+}
+
 static void put_root_tree_with_serial(void)
 {
 	void *fdt = fdt_test_begin(2048);
@@ -467,16 +542,13 @@ static void put_root_tree_with_serial(void)
 static void console_config_hands_the_serial_device_to_the_successor(void)
 {
 	struct mkfs fs = { sysfs };
-	char err[64];
 	void *dtbo;
 	size_t len;
 	int frag, ov, op, res, devs, dev;
 
 	setup();
 	put_root_tree_with_serial();
-	config_free(&cfg);
-	config_parse("cpus = 12\nmemory = 1GB\nkernel = /boot/vmlinuz\nconsole = ttyS0\n",
-		     &cfg, err, sizeof(err));
+	parse_console_config();
 	CHECK_EQ(arm_run(&cfg, &fs, &hooks), 0);
 	dtbo = read_blob("overlays/new", &len);
 	frag = fdt_path_offset(dtbo, "/fragment@0");
@@ -495,15 +567,12 @@ static void console_config_hands_the_serial_device_to_the_successor(void)
 static void console_config_puts_the_serial_device_in_a_new_pool(void)
 {
 	struct mkfs fs = { sysfs };
-	char err[64];
 	void *dtb;
 	size_t len;
 	int res, devs, dev;
 
 	setup();
-	config_free(&cfg);
-	config_parse("cpus = 12\nmemory = 1GB\nkernel = /boot/vmlinuz\nconsole = ttyS0\n",
-		     &cfg, err, sizeof(err));
+	parse_console_config();
 	put("device_tree", "", 0);
 	CHECK_EQ(arm_run(&cfg, &fs, &hooks), 0);
 	dtb = read_blob("device_tree", &len);
@@ -520,12 +589,9 @@ static void console_config_puts_the_serial_device_in_a_new_pool(void)
 static void console_config_refuses_a_pool_without_the_serial_device(void)
 {
 	struct mkfs fs = { sysfs };
-	char err[64];
 
 	setup();
-	config_free(&cfg);
-	config_parse("cpus = 12\nmemory = 1GB\nkernel = /boot/vmlinuz\nconsole = ttyS0\n",
-		     &cfg, err, sizeof(err));
+	parse_console_config();
 	CHECK_EQ(arm_run(&cfg, &fs, &hooks), -ENOENT);
 	CHECK_STREQ(calls.seq, "");
 	config_free(&cfg);
@@ -639,6 +705,44 @@ static void missing_pool_devices_are_added_by_overlay(void)
 	config_free(&cfg);
 }
 
+static void arm_uses_the_configured_initrd_over_the_default(void)
+{
+	struct mkfs fs = { sysfs };
+	char other[700];
+	struct cpio_entry e;
+
+	setup();
+	snprintf(other, sizeof(other), "%s/other.img", sysfs);
+	CHECK_EQ(file_write(other, "OTHER-IMAGE-BYTES", 17), 0);
+	cfg.initrd = strdup(other);
+	CHECK_EQ(arm_run(&cfg, &fs, &hooks), 0);
+	CHECK(calls.initrd_len > 17);
+	CHECK(memcmp(calls.initrd, "OTHER-IMAGE-BYTES", 17) == 0);
+	{
+		size_t off = 17;
+
+		CHECK_EQ(cpio_next(calls.initrd, calls.initrd_len, &off, &e), 1);
+		CHECK_STREQ(e.name, "etc");
+	}
+	config_free(&cfg);
+}
+
+static void arm_refuses_a_missing_image_before_creating_the_instance(void)
+{
+	struct mkfs fs = { sysfs };
+	void *dtbo;
+	size_t dtbo_len;
+
+	setup();
+	unlink(image_path);
+	CHECK_EQ(arm_run(&cfg, &fs, &hooks), -ENOENT);
+	CHECK_STREQ(calls.seq, "");
+	dtbo = read_blob("overlays/new", &dtbo_len);
+	CHECK_EQ(dtbo_len, 0);
+	free(dtbo);
+	config_free(&cfg);
+}
+
 static void arm_needs_kernel_cpus_and_memory(void)
 {
 	struct mkfs fs = { sysfs };
@@ -707,6 +811,8 @@ TEST_MAIN({
 	snprintf(vmcoreinfo_path, sizeof(vmcoreinfo_path), "%s/vmcoreinfo", sysfs);
 	snprintf(cpu_root, sizeof(cpu_root), "%s/cpu", sysfs);
 	snprintf(kcore_path, sizeof(kcore_path), "%s/kcore", sysfs);
+	snprintf(image_path, sizeof(image_path), "%s/successor.img", sysfs);
+	snprintf(login_path, sizeof(login_path), "%s/sh", sysfs);
 	mkdir(cpu_root, 0755);
 	CHECK_EQ(file_write(block_size, "8000000\n", 8), 0);
 	RUN(arm_creates_loads_and_execs);
@@ -726,6 +832,8 @@ TEST_MAIN({
 	RUN(arm_initialises_the_pool_when_there_is_none);
 	RUN(arm_refuses_a_pool_baseline_with_an_unknown_device);
 	RUN(missing_pool_devices_are_added_by_overlay);
+	RUN(arm_uses_the_configured_initrd_over_the_default);
+	RUN(arm_refuses_a_missing_image_before_creating_the_instance);
 	RUN(arm_needs_kernel_cpus_and_memory);
 	RUN(disarm_of_a_loaded_instance_skips_the_halt);
 	RUN(disarm_of_a_bare_instance_only_removes_it);

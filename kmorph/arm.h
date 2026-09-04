@@ -19,6 +19,7 @@ struct arm_hooks {
 	const char *vmcoreinfo_path;	/* /sys/kernel/vmcoreinfo */
 	const char *cpu_root;		/* /sys/devices/system/cpu, for crash_notes */
 	const char *kcore_path;		/* /proc/kcore, for the direct-map base */
+	const char *default_initrd;	/* the image kmorph init wrote, when initrd is unset */
 };
 
 extern const struct arm_hooks arm_default_hooks;
