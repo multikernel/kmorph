@@ -798,6 +798,14 @@ static void disarm_halts_then_removes_the_instance(void)
 	config_free(&cfg);
 }
 
+static void memory_must_hold_three_times_the_image(void)
+{
+	CHECK(arm_memory_fits(512ULL << 20, 100 << 20));
+	CHECK(!arm_memory_fits(128ULL << 20, 60 << 20));
+	CHECK(arm_memory_fits(3, 1));
+	CHECK(!arm_memory_fits(2, 1));
+}
+
 TEST_MAIN({
 	if (!mkdtemp(sysfs)) {
 		perror("mkdtemp");
@@ -835,6 +843,7 @@ TEST_MAIN({
 	RUN(arm_uses_the_configured_initrd_over_the_default);
 	RUN(arm_refuses_a_missing_image_before_creating_the_instance);
 	RUN(arm_needs_kernel_cpus_and_memory);
+	RUN(memory_must_hold_three_times_the_image);
 	RUN(disarm_of_a_loaded_instance_skips_the_halt);
 	RUN(disarm_of_a_bare_instance_only_removes_it);
 	RUN(disarm_halts_then_removes_the_instance);

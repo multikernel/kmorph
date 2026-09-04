@@ -1,6 +1,9 @@
 #ifndef KMORPH_ARM_H
 #define KMORPH_ARM_H
 
+#include <stdbool.h>
+#include <stdint.h>
+
 #include "kmorph/config.h"
 #include "kmorph/dt.h"
 #include "kmorph/mkfs.h"
@@ -27,6 +30,9 @@ extern const struct arm_hooks arm_default_hooks;
 /* Pool devices the config names but the pool lacks; returns how many were added. */
 int arm_pool_add_devices(const struct kmorph_config *cfg, const struct mkfs *fs,
 			 const struct pool_view *pool);
+
+/* An initramfs unpacks into the successor's RAM; three times its size is the floor. */
+bool arm_memory_fits(uint64_t memory, size_t image_len);
 
 int arm_run(const struct kmorph_config *cfg, const struct mkfs *fs, const struct arm_hooks *h);
 int disarm_run(const struct kmorph_config *cfg, const struct mkfs *fs, const struct arm_hooks *h);

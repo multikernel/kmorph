@@ -367,6 +367,11 @@ static int write_all(int fd, const void *buf, size_t len)
 	return 0;
 }
 
+bool arm_memory_fits(uint64_t memory, size_t image_len)
+{
+	return memory / 3 >= image_len;
+}
+
 /* The image, then the one thing only arm knows: the config. */
 static int successor_initrd(const struct kmorph_config *cfg, const struct arm_hooks *h)
 {
@@ -382,6 +387,9 @@ static int successor_initrd(const struct kmorph_config *cfg, const struct arm_ho
 			cfg->initrd ? "" : "; 'kmorph init' builds it");
 		return ret;
 	}
+	if (!arm_memory_fits(cfg->memory, len))
+		log_warn("memory = %llu MB may not hold the %zu MB image once unpacked",
+			 (unsigned long long)cfg->memory >> 20, len >> 20);
 	ret = cpio_add_file(&extra, KMORPH_CONFIG_PATH, cfg->text, strlen(cfg->text), 0644);
 	if (!ret)
 		ret = cpio_finish(&extra);
