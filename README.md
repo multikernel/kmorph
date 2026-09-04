@@ -58,7 +58,7 @@ in `/etc/kmorph`.
    memory  = 128MB
    kernel  = /boot/vmlinuz
    cmdline = earlyprintk=serial,ttyS0,115200 keep_bootcon
-   devices = 0000:09:00.0
+   devices = enp9s0
    console = ttyS0
    console_login = /usr/local/lib/kmorph/sh
    ```
@@ -149,7 +149,7 @@ programs read the same file; each uses the keys for its side. `kernel`,
 | `kernel` | | Kernel image: an ELF vmlinux, or a bzImage from which the vmlinux is extracted. |
 | `initrd` | `/var/lib/kmorph/successor.img` | Initramfs for the successor; the default is what `kmorph init` writes. kmorph appends the config to whichever image is used. |
 | `cmdline` | | Kernel command line for the successor. See [Successor console](#successor-console). With `dump` set, kmorph adds `iomem=relaxed`, which the successor needs to read the predecessor's memory through `/dev/mem` on kernels built with `IO_STRICT_DEVMEM`. |
-| `devices` | | PCI functions handed to the successor, comma separated, e.g. `0000:09:00.0`. Give it its own NIC and disk. |
+| `devices` | | Devices handed to the successor, comma separated, as PCI addresses (`0000:09:00.0`) or as the names sysfs knows them by: a network interface (`enp61s0f1`), a block device (`nvme0n1`), a framebuffer (`fb0`), a USB bus (`usb1`). A name resolves to the PCI function behind it; the successor only ever sees the address. Give it its own NIC and disk. |
 | `machine_cpus` | from the MADT | Every CPU on the machine. Set only on a machine without ACPI. |
 | `modules` | | Kernel modules the distro image builders add to the successor image, comma separated: the vsock transport when it is a module, drivers for devices in `devices`. The `kmorph init` image has no module loader and ignores it. |
 | `console` | | Serial line the successor takes over after the crash, e.g. `ttyS0`. |

@@ -15,7 +15,7 @@
 static char sysfs[] = "/tmp/kmorph-test-arm-XXXXXX";
 static char pci_root[600], block_size[600], madt_path[600], iomem_path[600];
 static char vmcoreinfo_path[600], cpu_root[600], kcore_path[600];
-static char image_path[600], login_path[600];
+static char image_path[600], login_path[600], class_root[600], usb_root[600];
 
 struct calls {
 	char seq[32];
@@ -79,6 +79,8 @@ static const struct arm_hooks hooks = {
 	.cpu_root = cpu_root,
 	.kcore_path = kcore_path,
 	.default_initrd = image_path,
+	.class_root = class_root,
+	.usb_root = usb_root,
 };
 
 static void put(const char *rel, const void *data, size_t len)
@@ -743,6 +745,49 @@ static void arm_refuses_a_missing_image_before_creating_the_instance(void)
 	config_free(&cfg);
 }
 
+static void device_names_resolve_to_pci_addresses(void)
+{
+	struct mkfs fs = { sysfs };
+	char err[64], path[1400], target[1400];
+	void *dtbo;
+	size_t len;
+	int frag, ov, op, item;
+
+	setup();
+	put_pci_device("0000:09:00.0", "0x1af4\n", "0x1041\n");
+	mkdir_rel("class");
+	mkdir_rel("class/net");
+	mkdir_rel("devices");
+	mkdir_rel("devices/pci0000:00");
+	mkdir_rel("devices/pci0000:00/0000:09:00.0");
+	mkdir_rel("devices/pci0000:00/0000:09:00.0/net");
+	mkdir_rel("devices/pci0000:00/0000:09:00.0/net/eth9");
+	snprintf(target, sizeof(target), "%s/devices/pci0000:00/0000:09:00.0/net/eth9", sysfs);
+	snprintf(path, sizeof(path), "%s/class/net/eth9", sysfs);
+	unlink(path);
+	CHECK_EQ(symlink(target, path), 0);
+	config_free(&cfg);
+	config_parse("cpus = 12\nmemory = 1GB\nkernel = /boot/vmlinuz\ndevices = eth9\n",
+		     &cfg, err, sizeof(err));
+	CHECK_EQ(arm_run(&cfg, &fs, &hooks), 0);
+	CHECK_STREQ(cfg.devices.items[0], "eth9");
+	dtbo = read_blob("overlays/new", &len);
+	frag = fdt_path_offset(dtbo, "/fragment@1");
+	ov = fdt_subnode_offset(dtbo, frag, "__overlay__");
+	op = fdt_subnode_offset(dtbo, ov, "device-add");
+	item = fdt_subnode_offset(dtbo, op, "pci@0");
+	CHECK_STREQ(fdt_getprop(dtbo, item, "pci-id", NULL), "0000:09:00.0");
+	free(dtbo);
+
+	config_free(&cfg);
+	memset(&calls, 0, sizeof(calls));
+	config_parse("cpus = 12\nmemory = 1GB\nkernel = /boot/vmlinuz\ndevices = nosuch0\n",
+		     &cfg, err, sizeof(err));
+	CHECK_EQ(arm_run(&cfg, &fs, &hooks), -ENOENT);
+	CHECK_STREQ(calls.seq, "");
+	config_free(&cfg);
+}
+
 static void arm_needs_kernel_cpus_and_memory(void)
 {
 	struct mkfs fs = { sysfs };
@@ -821,6 +866,8 @@ TEST_MAIN({
 	snprintf(kcore_path, sizeof(kcore_path), "%s/kcore", sysfs);
 	snprintf(image_path, sizeof(image_path), "%s/successor.img", sysfs);
 	snprintf(login_path, sizeof(login_path), "%s/sh", sysfs);
+	snprintf(class_root, sizeof(class_root), "%s/class", sysfs);
+	snprintf(usb_root, sizeof(usb_root), "%s/usb", sysfs);
 	mkdir(cpu_root, 0755);
 	CHECK_EQ(file_write(block_size, "8000000\n", 8), 0);
 	RUN(arm_creates_loads_and_execs);
@@ -842,6 +889,7 @@ TEST_MAIN({
 	RUN(missing_pool_devices_are_added_by_overlay);
 	RUN(arm_uses_the_configured_initrd_over_the_default);
 	RUN(arm_refuses_a_missing_image_before_creating_the_instance);
+	RUN(device_names_resolve_to_pci_addresses);
 	RUN(arm_needs_kernel_cpus_and_memory);
 	RUN(memory_must_hold_three_times_the_image);
 	RUN(disarm_of_a_loaded_instance_skips_the_halt);

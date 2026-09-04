@@ -22,8 +22,10 @@ memory  = 128MB
 # Kernel command line for the successor.
 #cmdline = earlyprintk=serial,ttyS0,115200 keep_bootcon
 
-# PCI functions handed to the successor, comma separated.
-#devices = 0000:09:00.0
+# Devices handed to the successor, comma separated: PCI addresses or
+# the names sysfs knows them by (a network interface, a block device,
+# a framebuffer, a USB bus).
+#devices = enp9s0, nvme1n1
 
 # Instance name in /sys/fs/multikernel/instances.
 #name = successor

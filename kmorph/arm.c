@@ -8,6 +8,7 @@
 
 #include "kmorph/cpio.h"
 #include "kmorph/crashinfo.h"
+#include "kmorph/devname.h"
 #include "kmorph/dt.h"
 #include "kmorph/log.h"
 #include "kmorph/mksys.h"
@@ -34,6 +35,8 @@ const struct arm_hooks arm_default_hooks = {
 	.cpu_root = CPU_SYSFS_ROOT,
 	.kcore_path = KCORE_PATH,
 	.default_initrd = KMORPH_INITRD_PATH,
+	.class_root = DEVNAME_CLASS_ROOT,
+	.usb_root = DEVNAME_USB_ROOT,
 };
 
 static bool strlist_has(const struct strlist *l, const char *s)
@@ -452,22 +455,77 @@ static int load_and_exec(const struct kmorph_config *cfg, const struct arm_hooks
 	return ret;
 }
 
+/* Names from sysfs become the PCI addresses the kernel wants; the config itself is untouched. */
+static int resolve_devices(const struct kmorph_config *cfg, const struct arm_hooks *h,
+			   struct strlist *out)
+{
+	size_t i;
+
+	out->items = calloc(cfg->devices.count + 1, sizeof(*out->items));
+	if (!out->items)
+		return -ENOMEM;
+	out->count = 0;
+	for (i = 0; i < cfg->devices.count; i++) {
+		const char *name = cfg->devices.items[i];
+		char id[16];
+		int ret = 0;
+
+		if (!devname_is_pci_id(name)) {
+			ret = devname_resolve(h->class_root, h->usb_root, name, id, sizeof(id));
+			if (ret == -ENOENT)
+				log_err("no device named %s under %s or %s", name, h->class_root,
+					h->usb_root);
+			else if (ret == -EEXIST)
+				log_err("%s names more than one device; use its PCI address", name);
+			else if (ret == -ENODEV)
+				log_err("%s is not a PCI device; only PCI functions can be handed over",
+					name);
+			else if (ret)
+				log_err("cannot resolve %s: %s", name, strerror(-ret));
+			else
+				log_info("%s is %s", name, id);
+			name = id;
+		}
+		if (!ret) {
+			out->items[out->count] = strdup(name);
+			if (!out->items[out->count])
+				ret = -ENOMEM;
+		}
+		if (ret) {
+			strlist_free(out);
+			return ret;
+		}
+		out->count++;
+	}
+	return 0;
+}
+
 int arm_run(const struct kmorph_config *cfg, const struct mkfs *fs, const struct arm_hooks *h)
 {
+	struct kmorph_config resolved;
+	struct strlist devices;
 	uint32_t id;
-	int initrd_fd, ret;
+	int initrd_fd = -1, ret;
 
 	if (!cfg->kernel || !cfg->cpus.count || !cfg->memory) {
 		log_err("config needs kernel, cpus and memory to arm a successor");
 		return -EINVAL;
 	}
+	ret = resolve_devices(cfg, h, &devices);
+	if (ret)
+		return ret;
+	resolved = *cfg;
+	resolved.devices = devices;
+	cfg = &resolved;
 
 	ret = ensure_pool(cfg, fs, h);
 	if (ret)
-		return ret;
+		goto out;
 	initrd_fd = successor_initrd(cfg, h);
-	if (initrd_fd < 0)
-		return initrd_fd;
+	if (initrd_fd < 0) {
+		ret = initrd_fd;
+		goto out;
+	}
 	ret = create_instance(cfg, fs, h);
 	if (ret)
 		goto out;
@@ -485,7 +543,9 @@ int arm_run(const struct kmorph_config *cfg, const struct mkfs *fs, const struct
 	}
 	log_info("successor %s armed", cfg->name);
 out:
-	close(initrd_fd);
+	if (initrd_fd >= 0)
+		close(initrd_fd);
+	strlist_free(&devices);
 	return ret;
 }
 
