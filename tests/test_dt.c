@@ -59,6 +59,7 @@ static void instance_create_adds_devices_in_a_second_fragment(void)
 	CHECK(op >= 0);
 	item = fdt_subnode_offset(dtbo, op, "pci@0");
 	CHECK_STREQ(fdt_getprop(dtbo, item, "pci-id", NULL), "0000:09:00.0");
+	CHECK_STREQ(fdt_getprop(dtbo, item, "iommu", NULL), "spare");
 	item = fdt_subnode_offset(dtbo, op, "pci@1");
 	CHECK_STREQ(fdt_getprop(dtbo, item, "pci-id", NULL), "0000:0a:00.0");
 	free(dtbo);
@@ -207,6 +208,7 @@ static void pool_baseline_lists_devices_with_ids(void)
 	CHECK(dev >= 0);
 	CHECK_STREQ(fdt_getprop(dtb, dev, "device-type", NULL), "pci");
 	CHECK_STREQ(fdt_getprop(dtb, dev, "pci-id", NULL), "0000:09:00.0");
+	CHECK_STREQ(fdt_getprop(dtb, dev, "iommu", NULL), "spare");
 	CHECK_EQ(fdt32_to_cpu(*(const fdt32_t *)fdt_getprop(dtb, dev, "vendor-id", &plen)), 0x1af4);
 	CHECK_EQ(fdt32_to_cpu(*(const fdt32_t *)fdt_getprop(dtb, dev, "device-id", &plen)), 0x1041);
 	free(dtb);

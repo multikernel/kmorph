@@ -21,6 +21,10 @@ int mkfs_mount(const struct mkfs *fs);
  * when the write itself failed. tx_id is set whenever a transaction exists.
  */
 int mkfs_apply_overlay(const struct mkfs *fs, const void *dtbo, size_t len, int *tx_id);
+/* The kernel's sentence on a failed transaction; empty when it gave none. */
+int mkfs_tx_reason(const struct mkfs *fs, int tx_id, char *buf, size_t len);
+/* Roll a failed transaction back; the kernel undoes it on rmdir of its directory. */
+int mkfs_tx_rollback(const struct mkfs *fs, int tx_id);
 int mkfs_write_baseline(const struct mkfs *fs, const void *dtb, size_t len);
 int mkfs_read_root_tree(const struct mkfs *fs, void **dtb, size_t *len);
 int mkfs_instance_id(const struct mkfs *fs, const char *name, uint32_t *id);

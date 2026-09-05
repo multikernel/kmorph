@@ -83,6 +83,31 @@ int mkfs_apply_overlay(const struct mkfs *fs, const void *dtbo, size_t len, int 
 	return ret;
 }
 
+int mkfs_tx_reason(const struct mkfs *fs, int tx_id, char *buf, size_t len)
+{
+	char path[PATH_MAX], rel[64], *reason;
+	int ret;
+
+	buf[0] = '\0';
+	snprintf(rel, sizeof(rel), "overlays/tx_%d/reason", tx_id);
+	mkfs_path(fs, path, sizeof(path), rel);
+	ret = file_read_string(path, &reason);
+	if (ret)
+		return ret;
+	snprintf(buf, len, "%s", reason);
+	free(reason);
+	return 0;
+}
+
+int mkfs_tx_rollback(const struct mkfs *fs, int tx_id)
+{
+	char path[PATH_MAX], rel[64];
+
+	snprintf(rel, sizeof(rel), "overlays/tx_%d", tx_id);
+	mkfs_path(fs, path, sizeof(path), rel);
+	return rmdir(path) < 0 ? -errno : 0;
+}
+
 int mkfs_write_baseline(const struct mkfs *fs, const void *dtb, size_t len)
 {
 	char path[PATH_MAX];

@@ -39,6 +39,8 @@ const struct arm_hooks arm_default_hooks = {
 	.usb_root = DEVNAME_USB_ROOT,
 };
 
+static void log_overlay_failure(const char *what, const struct mkfs *fs, int tx, int err);
+
 static bool strlist_has(const struct strlist *l, const char *s)
 {
 	size_t i;
@@ -145,7 +147,7 @@ static int init_pool(const struct kmorph_config *cfg, const struct mkfs *fs,
 		free(dtb);
 	}
 	if (ret)
-		log_err("pool initialisation failed: %s", strerror(-ret));
+		log_err("pool initialisation failed: %s; the kernel log says why", strerror(-ret));
 	else
 		log_info("pool initialised with the successor's resources");
 	return ret;
@@ -178,8 +180,7 @@ int arm_pool_add_devices(const struct kmorph_config *cfg, const struct mkfs *fs,
 		free(dtbo);
 	}
 	if (ret)
-		log_err("adding %zu device(s) to the pool failed (tx %d): %s",
-			missing.count, tx, strerror(-ret));
+		log_overlay_failure("pool device-add", fs, tx, ret);
 	else
 		log_info("%zu device(s) added to the pool", missing.count);
 	ret = ret ? ret : (int)missing.count;
@@ -290,6 +291,21 @@ static void release_host_tree(const struct kmorph_config *cfg, struct host_tree 
 	host_tree_free(ht);
 }
 
+/* The kernel's own sentence when it has one, the errno otherwise. */
+static void log_overlay_failure(const char *what, const struct mkfs *fs, int tx, int err)
+{
+	char reason[256];
+
+	if (tx >= 0 && !mkfs_tx_reason(fs, tx, reason, sizeof(reason)) && reason[0])
+		log_err("%s overlay failed (tx %d): %s", what, tx, reason);
+	else
+		log_err("%s overlay failed (tx %d): %s", what, tx, strerror(-err));
+	/* A failed transaction keeps what it managed to do until it is rolled back. */
+	if (tx >= 0 && mkfs_tx_rollback(fs, tx))
+		log_warn("transaction %d left in place; rmdir %s/overlays/tx_%d rolls it back",
+			 tx, fs->root, tx);
+}
+
 static int create_instance(const struct kmorph_config *cfg, const struct mkfs *fs,
 			   const struct arm_hooks *h)
 {
@@ -311,7 +327,7 @@ static int create_instance(const struct kmorph_config *cfg, const struct mkfs *f
 	ret = mkfs_apply_overlay(fs, dtbo, len, &tx);
 	free(dtbo);
 	if (ret)
-		log_err("instance-create overlay failed (tx %d): %s", tx, strerror(-ret));
+		log_overlay_failure("instance-create", fs, tx, ret);
 	return ret;
 }
 
@@ -586,7 +602,7 @@ int disarm_run(const struct kmorph_config *cfg, const struct mkfs *fs, const str
 	ret = mkfs_apply_overlay(fs, dtbo, len, &tx);
 	free(dtbo);
 	if (ret)
-		log_err("instance-remove overlay failed (tx %d): %s", tx, strerror(-ret));
+		log_overlay_failure("instance-remove", fs, tx, ret);
 	else
 		log_info("successor %s disarmed", cfg->name);
 	return ret;

@@ -75,6 +75,7 @@ static int emit_device_add(void *fdt, int fragment, const char *target,
 		snprintf(node, sizeof(node), "pci@%zu", i);
 		TRY(fdt_begin_node(fdt, node));
 		TRY(fdt_property_string(fdt, "pci-id", devices->items[i]));
+		TRY(fdt_property_string(fdt, "iommu", "spare"));
 		TRY(fdt_end_node(fdt));
 	}
 	TRY(fdt_end_node(fdt));
@@ -238,6 +239,8 @@ static int emit_pci_device_nodes(void *fdt, const struct pci_list *devices)
 		TRY(fdt_begin_node(fdt, node));
 		TRY(fdt_property_string(fdt, "device-type", "pci"));
 		TRY(fdt_property_string(fdt, "pci-id", d->id));
+		/* A successor programs plain interrupts; the unit behind the device must let them through. */
+		TRY(fdt_property_string(fdt, "iommu", "spare"));
 		TRY(fdt_property_u32(fdt, "vendor-id", d->vendor));
 		TRY(fdt_property_u32(fdt, "device-id", d->device));
 		TRY(fdt_end_node(fdt));

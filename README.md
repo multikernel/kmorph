@@ -355,7 +355,15 @@ halt and fence, and vsock for liveness.
    node also tells the predecessor kernel to save each CPU's registers
    when it stops, so the dump carries them. When the machine has no pool
    yet, a baseline written to
-   `/sys/fs/multikernel/device_tree` creates one first.
+   `/sys/fs/multikernel/device_tree` creates one first. Every PCI device
+   handed over carries `iommu = "spare"`: a successor programs plain
+   interrupts, which a host running interrupt remapping would otherwise
+   drop, so the kernel leaves the IOMMU unit behind the device unused for
+   as long as the device is away. That works for a device on its own root
+   complex, a NIC or a disk controller on a server, and is refused with
+   the reason for a device that shares its unit with the host's own,
+   such as chipset USB or graphics; `kmorph arm` prints the kernel's
+   reason. Without interrupt remapping the request costs nothing.
 2. **Load.** `kexec_file_load()` in multikernel mode loads the kernel and
    the initramfs for that instance. The initramfs is the image with the
    config appended, assembled in memory; nothing on disk is changed.

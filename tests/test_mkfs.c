@@ -50,12 +50,21 @@ static void apply_overlay_writes_blob_and_reports_latest_tx(void)
 
 static void apply_overlay_reports_failed_transaction(void)
 {
+	char reason[128];
 	int tx = -1;
 
 	mkdir_rel("overlays/tx_11");
 	put("overlays/tx_11/status", "failed\n");
+	put("overlays/tx_11/reason", "0000:00:14.0 is behind the IOMMU unit that also serves the IOAPIC\n");
 	CHECK_EQ(mkfs_apply_overlay(&fs, "DTBO", 4, &tx), -EIO);
 	CHECK_EQ(tx, 11);
+	CHECK_EQ(mkfs_tx_reason(&fs, 11, reason, sizeof(reason)), 0);
+	CHECK_STREQ(reason, "0000:00:14.0 is behind the IOMMU unit that also serves the IOAPIC");
+	CHECK_EQ(mkfs_tx_reason(&fs, 2, reason, sizeof(reason)), -ENOENT);
+	CHECK_STREQ(reason, "");
+	mkdir_rel("overlays/tx_12");
+	CHECK_EQ(mkfs_tx_rollback(&fs, 12), 0);
+	CHECK_EQ(mkfs_tx_rollback(&fs, 12), -ENOENT);
 }
 
 static void apply_overlay_without_interface_is_enoent(void)
