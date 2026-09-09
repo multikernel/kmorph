@@ -2,13 +2,15 @@
 
 # kmorph: Transforming Kernels Without Reboots
 
-kmorph is crash auto-healing for multikernel Linux. A backup kernel, the
-**successor**, is armed beside the kernel running the machine, the
-**predecessor**. When the predecessor crashes, the successor fences its
-CPUs, adopts its CPUs and memory, and carries on running the machine. No
-reboot, no operator, about one second from detection to a running
-successor, and the predecessor's memory can be preserved for post-mortem
-inspection.
+kmorph transforms a running multikernel Linux machine from one kernel into
+another without a reboot. A second kernel, the **successor**, is armed
+beside the kernel running the machine, the **predecessor**, and takes it
+over. Today the takeover happens on a crash: when the predecessor panics,
+the successor fences its CPUs, adopts its CPUs and memory, and carries on
+running the machine. No reboot, no operator, about one second from
+detection to a running successor, and the predecessor's memory can be
+preserved for post-mortem inspection. The same takeover on request, a
+zero-downtime kernel upgrade, is on the roadmap.
 
 kmorph consists of two programs and one configuration file:
 
