@@ -212,7 +212,8 @@ static int open_listener(void)
 	struct sockaddr_vsock addr;
 	int fd;
 
-	fd = vsock_multikernel_socket(0);
+	/* A wakeup with no connection left to accept must not stall the probes */
+	fd = vsock_multikernel_socket(SOCK_NONBLOCK);
 	if (fd < 0)
 		return fd;
 	memset(&addr, 0, sizeof(addr));
