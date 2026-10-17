@@ -1,10 +1,22 @@
 #!/bin/sh
 # Start kmorphd before the root device is looked for; it daemonises.
+# A successor then waits here for the takeover: the root device can
+# appear before it is done, the predecessor's disk being adopted first,
+# and the boot must not reach the real init with kmorphd mid-takeover.
 PREREQ="udev"
 prereqs() { echo "$PREREQ"; }
 case "$1" in
 prereqs) prereqs; exit 0 ;;
 esac
 
-[ -x /usr/bin/kmorphd ] && /usr/bin/kmorphd
+[ -x /usr/bin/kmorphd ] || exit 0
+[ -d /proc/device-tree/chosen/multikernel,host-tree ] || exit 0
+
+/usr/bin/kmorphd
+. /scripts/functions
+log_begin_msg "Waiting for the kmorph takeover"
+until grep -q "^TAKEN_OVER" /run/kmorph/state 2>/dev/null; do
+	sleep 0.1 2>/dev/null || sleep 1
+done
+log_end_msg
 exit 0
