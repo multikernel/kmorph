@@ -23,12 +23,19 @@ installkernel() {
 	return 0
 }
 
+# The root device can appear before the takeover is done, the
+# predecessor's disk being adopted first; switching root then would kill
+# kmorphd mid-takeover, so the wait unit holds initrd.target until then.
 install() {
+	local unit
+
 	inst_binary /usr/bin/kmorphd
+	inst_multiple grep sleep
 	[ -f /etc/kmorph/kmorph.conf ] && inst_simple /etc/kmorph/kmorph.conf
-	inst_simple "$moddir/kmorphd-initrd.service" \
-		"$systemdsystemunitdir/kmorphd-initrd.service"
 	mkdir -p "$initdir$systemdsystemunitdir/initrd.target.wants"
-	ln_r "$systemdsystemunitdir/kmorphd-initrd.service" \
-		"$systemdsystemunitdir/initrd.target.wants/kmorphd-initrd.service"
+	for unit in kmorphd-initrd.service kmorph-takeover-wait.service; do
+		inst_simple "$moddir/$unit" "$systemdsystemunitdir/$unit"
+		ln_r "$systemdsystemunitdir/$unit" \
+			"$systemdsystemunitdir/initrd.target.wants/$unit"
+	done
 }

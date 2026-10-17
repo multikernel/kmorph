@@ -1,0 +1,12 @@
+[Unit]
+Description=Wait for the kmorph takeover
+DefaultDependencies=no
+ConditionPathExists=/proc/device-tree/chosen/multikernel,host-tree
+After=kmorphd-initrd.service
+Before=initrd.target initrd-cleanup.service initrd-switch-root.target
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+TimeoutStartSec=infinity
+ExecStart=/bin/sh -c 'until grep -q "^TAKEN_OVER" /run/kmorph/state 2>/dev/null; do sleep 0.1; done'

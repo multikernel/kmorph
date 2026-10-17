@@ -110,8 +110,8 @@ installed and points the `kernel` and `cmdline` keys at it.
 The successor's image is thus the distro's own initramfs with kmorphd
 inside it, at the path `kmorph arm` reads by default, while the host's
 boot initramfs is left alone. In the successor, kmorphd is started by
-the initramfs's init while it waits for a root device the host still
-owns. The operator writes the remaining keys once:
+the initramfs's init, which then waits for the takeover before it goes
+on to the root device. The operator writes the remaining keys once:
 
 ```ini
 cpus    = 47
@@ -130,10 +130,11 @@ systemctl enable --now kmorph
 it cannot. `console_login` needs no static program here, since the
 initramfs has libc. `kmorph init` is not involved.
 
-After a takeover the successor sits in the initramfs with the console
-until the kernel can hand it the host's disk, at which point the
-initramfs mounts root and the machine continues as itself. That
-handover is kernel work still to come.
+After a takeover the successor has adopted every device of the
+predecessor, so the initramfs mounts the root disk and starts the
+system's own init, which brings the network, the mounts and the
+services back as at any boot: the machine continues as itself, its
+user space restarted on a kernel already running.
 
 ## Configuration
 
