@@ -18,7 +18,7 @@
  *       cpus = <u64 ...>;
  *       memory@X { device_type = "memory"; reg = <base size>; } ...
  *       devices { pci_dddd_bb_ss_f { device-type = "pci"; pci-id;
- *                                   vendor-id; device-id; } ... }
+ *                                   vendor-id; device-id; class-code; } ... }
  *       vmcore {                       optional: what a vmcore needs
  *           page-offset = <u64>;       beyond the memory itself
  *           vmcoreinfo { reg = <paddr size>; };

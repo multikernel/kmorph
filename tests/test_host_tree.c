@@ -14,7 +14,7 @@ static char dir[] = "/tmp/kmorph-test-host-tree-XXXXXX";
 static void emits_cpus_ram_and_devices_under_the_node(void)
 {
 	uint64_t ids[] = { 0, 1, 2, 3 };
-	struct pci_ids devs[] = { { "0000:09:00.0", 0x1af4, 0x1041 } };
+	struct pci_ids devs[] = { { "0000:09:00.0", 0x1af4, 0x1041, 0x020000 } };
 	struct host_tree ht = { { ids, 4 }, RANGESET_INIT, { devs, 1 }, VMCORE_INFO_INIT };
 	void *fdt = fdt_test_begin(4096);
 	int node, mem, devices, dev, plen;
@@ -38,6 +38,7 @@ static void emits_cpus_ram_and_devices_under_the_node(void)
 	dev = fdt_first_subnode(fdt, devices);
 	CHECK_STREQ(fdt_getprop(fdt, dev, "pci-id", NULL), "0000:09:00.0");
 	CHECK_EQ(fdt32_to_cpu(*(const fdt32_t *)fdt_getprop(fdt, dev, "vendor-id", &plen)), 0x1af4);
+	CHECK_EQ(fdt32_to_cpu(*(const fdt32_t *)fdt_getprop(fdt, dev, "class-code", &plen)), 0x020000);
 	free(fdt);
 	rangeset_free(&ht.ram);
 }
@@ -80,10 +81,12 @@ static void unlink_rel(const char *rel)
 	unlink(path);
 }
 
-static void reads_cpus_and_ram_back_from_a_directory(void)
+static void reads_cpus_ram_and_devices_back_from_a_directory(void)
 {
 	uint64_t cpu_ids[] = { 0, 1, 2, 3, 4, 5 };
 	fdt64_t cells[6], reg[2];
+	fdt32_t vendor = cpu_to_fdt32(0x1af4), device = cpu_to_fdt32(0x1041);
+	fdt32_t class = cpu_to_fdt32(0x060400);
 	struct host_tree ht;
 	size_t i;
 
@@ -98,6 +101,11 @@ static void reads_cpus_and_ram_back_from_a_directory(void)
 	reg[0] = cpu_to_fdt64(0x1000); reg[1] = cpu_to_fdt64(0x9f000);
 	put("memory@1000/reg", reg, sizeof(reg));
 	mkdir_rel("devices");
+	mkdir_rel("devices/pci_0000_00_01_0");
+	put("devices/pci_0000_00_01_0/pci-id", "0000:00:01.0", 13);
+	put("devices/pci_0000_00_01_0/vendor-id", &vendor, 4);
+	put("devices/pci_0000_00_01_0/device-id", &device, 4);
+	put("devices/pci_0000_00_01_0/class-code", &class, 4);
 	put("name", "multikernel,host-tree", 22);
 
 	CHECK_EQ(host_tree_read(dir, &ht), 0);
@@ -107,6 +115,10 @@ static void reads_cpus_and_ram_back_from_a_directory(void)
 	CHECK_EQ(ht.ram.r[0].base, 0x1000);
 	CHECK_EQ(ht.ram.r[1].base, 0x100000);
 	CHECK_EQ(ht.ram.r[1].size, 0x7ff00000);
+	CHECK_EQ(ht.devices.count, 1);
+	CHECK_STREQ(ht.devices.devs[0].id, "0000:00:01.0");
+	CHECK_EQ(ht.devices.devs[0].device, 0x1041);
+	CHECK(pci_is_bridge(&ht.devices.devs[0]));
 	host_tree_free(&ht);
 }
 
@@ -186,7 +198,7 @@ static void reads_the_vmcore_node_back_from_a_directory(void)
 	fdt64_t reg[4];
 	struct host_tree ht;
 
-	/* on top of the tree left by reads_cpus_and_ram_back_from_a_directory */
+	/* on top of the tree left by reads_cpus_ram_and_devices_back_from_a_directory */
 	mkdir_rel("vmcore");
 	put_u64("vmcore/page-offset", 0xffff888000000000ULL);
 	mkdir_rel("vmcore/vmcoreinfo");
@@ -225,7 +237,7 @@ TEST_MAIN({
 	}
 	RUN(emits_cpus_ram_and_devices_under_the_node);
 	RUN(emit_needs_cpus_and_ram);
-	RUN(reads_cpus_and_ram_back_from_a_directory);
+	RUN(reads_cpus_ram_and_devices_back_from_a_directory);
 	RUN(emits_the_vmcore_node_when_present);
 	RUN(omits_the_vmcore_node_when_absent);
 	RUN(reads_the_vmcore_node_back_from_a_directory);

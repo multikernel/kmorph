@@ -203,6 +203,32 @@ int dt_build_adopt(const char *name, const struct cpulist *cpus,
 	return fdtutil_build(build_adopt, &a, dtbo, len);
 }
 
+struct adopt_device_args {
+	const char *name;
+	const char *pci_id;
+};
+
+static int build_adopt_device(void *fdt, void *arg)
+{
+	const struct adopt_device_args *a = arg;
+	char *ids[] = { (char *)a->pci_id };
+	struct strlist one = { ids, 1 };
+	char target[256];
+
+	snprintf(target, sizeof(target), INSTANCES_PATH "/%s", a->name);
+	TRY(fdt_begin_node(fdt, ""));
+	TRY(fdt_property_string(fdt, "compatible", OVERLAY_COMPATIBLE));
+	TRY(emit_device_add(fdt, 0, target, &one));
+	return fdt_end_node(fdt);	/* root */
+}
+
+int dt_build_adopt_device(const char *name, const char *pci_id, void **dtbo, size_t *len)
+{
+	struct adopt_device_args a = { name, pci_id };
+
+	return fdtutil_build(build_adopt_device, &a, dtbo, len);
+}
+
 struct pool_args {
 	const struct cpulist *cpus;
 	uint64_t memory_bytes;
@@ -223,7 +249,7 @@ static int emit_platform_device_nodes(void *fdt, const struct strlist *names)
 	return 0;
 }
 
-static int emit_pci_device_nodes(void *fdt, const struct pci_list *devices)
+static int emit_pci_device_nodes(void *fdt, const struct pci_list *devices, bool with_class)
 {
 	size_t i;
 
@@ -240,6 +266,8 @@ static int emit_pci_device_nodes(void *fdt, const struct pci_list *devices)
 		TRY(fdt_property_string(fdt, "pci-id", d->id));
 		TRY(fdt_property_u32(fdt, "vendor-id", d->vendor));
 		TRY(fdt_property_u32(fdt, "device-id", d->device));
+		if (with_class)
+			TRY(fdt_property_u32(fdt, "class-code", d->class));
 		TRY(fdt_end_node(fdt));
 	}
 	return 0;
@@ -248,7 +276,7 @@ static int emit_pci_device_nodes(void *fdt, const struct pci_list *devices)
 int dt_emit_pci_devices(void *fdt, const struct pci_list *devices)
 {
 	TRY(fdt_begin_node(fdt, "devices"));
-	TRY(emit_pci_device_nodes(fdt, devices));
+	TRY(emit_pci_device_nodes(fdt, devices, true));
 	return fdt_end_node(fdt);
 }
 
@@ -267,7 +295,7 @@ static int build_pool_baseline(void *fdt, void *arg)
 	    (a->platform_devices && a->platform_devices->count)) {
 		TRY(fdt_begin_node(fdt, "devices"));
 		if (a->devices)
-			TRY(emit_pci_device_nodes(fdt, a->devices));
+			TRY(emit_pci_device_nodes(fdt, a->devices, false));
 		if (a->platform_devices)
 			TRY(emit_platform_device_nodes(fdt, a->platform_devices));
 		TRY(fdt_end_node(fdt));

@@ -188,11 +188,28 @@ static void adopt_omits_empty_operations(void)
 	CHECK(dt_build_adopt("successor", &cpus, &mem, &dtbo, &len) < 0);
 }
 
+static void adopt_device_adds_one_function_to_the_instance(void)
+{
+	void *dtbo;
+	size_t len;
+	int op, item;
+
+	CHECK_EQ(dt_build_adopt_device("successor", "0000:04:00.0", &dtbo, &len), 0);
+	CHECK_EQ(fdtutil_check(dtbo, len), 0);
+	op = overlay_node(dtbo, "/instances/successor", "device-add");
+	CHECK(op >= 0);
+	item = fdt_subnode_offset(dtbo, op, "pci@0");
+	CHECK_STREQ(fdt_getprop(dtbo, item, "pci-id", NULL), "0000:04:00.0");
+	CHECK(fdt_subnode_offset(dtbo, op, "pci@1") < 0);
+	CHECK(fdt_path_offset(dtbo, "/fragment@1") < 0);
+	free(dtbo);
+}
+
 static void pool_baseline_lists_devices_with_ids(void)
 {
 	uint64_t ids[] = { 12 };
 	struct cpulist cpus = { ids, 1 };
-	struct pci_ids devs[] = { { "0000:09:00.0", 0x1af4, 0x1041 } };
+	struct pci_ids devs[] = { { "0000:09:00.0", 0x1af4, 0x1041, 0x020000 } };
 	struct pci_list devices = { devs, 1 };
 	void *dtb;
 	size_t len;
@@ -412,6 +429,7 @@ TEST_MAIN({
 	RUN(pool_baseline_lists_devices_with_ids);
 	RUN(pool_baseline_lists_platform_devices);
 	RUN(pool_device_add_targets_the_pool);
+	RUN(adopt_device_adds_one_function_to_the_instance);
 	RUN(pool_baseline_requests_own_resources_by_size);
 	RUN(foreign_baseline_names_takeable_by_reg);
 	RUN(pool_view_reports_free_cpus_and_bytes);

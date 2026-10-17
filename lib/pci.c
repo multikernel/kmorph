@@ -82,5 +82,12 @@ int pci_read_ids(const char *sysfs_root, const char *pci_id, struct pci_ids *out
 	ret = read_hex_attr(sysfs_root, pci_id, "vendor", &out->vendor);
 	if (!ret)
 		ret = read_hex_attr(sysfs_root, pci_id, "device", &out->device);
+	if (!ret)
+		ret = read_hex_attr(sysfs_root, pci_id, "class", &out->class);
 	return ret;
+}
+
+bool pci_is_bridge(const struct pci_ids *d)
+{
+	return d->class >> 16 == 0x06;
 }

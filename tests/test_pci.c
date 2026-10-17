@@ -19,11 +19,15 @@ static void reads_vendor_and_device_from_sysfs(void)
 	CHECK_EQ(file_write(path, "0x1af4\n", 7), 0);
 	snprintf(path, sizeof(path), "%s/0000:09:00.0/device", root);
 	CHECK_EQ(file_write(path, "0x1041\n", 7), 0);
+	snprintf(path, sizeof(path), "%s/0000:09:00.0/class", root);
+	CHECK_EQ(file_write(path, "0x020000\n", 9), 0);
 
 	CHECK_EQ(pci_read_ids(root, "0000:09:00.0", &ids), 0);
 	CHECK_STREQ(ids.id, "0000:09:00.0");
 	CHECK_EQ(ids.vendor, 0x1af4);
 	CHECK_EQ(ids.device, 0x1041);
+	CHECK_EQ(ids.class, 0x020000);
+	CHECK(!pci_is_bridge(&ids));
 }
 
 static void lists_every_device_in_sysfs_order(void)
@@ -37,6 +41,8 @@ static void lists_every_device_in_sysfs_order(void)
 	CHECK_EQ(file_write(path, "0x8086\n", 7), 0);
 	snprintf(path, sizeof(path), "%s/0000:00:01.2/device", root);
 	CHECK_EQ(file_write(path, "0x1234\n", 7), 0);
+	snprintf(path, sizeof(path), "%s/0000:00:01.2/class", root);
+	CHECK_EQ(file_write(path, "0x060400\n", 9), 0);
 	snprintf(path, sizeof(path), "%s/not-a-device", root);
 	mkdir(path, 0755);
 
@@ -44,6 +50,7 @@ static void lists_every_device_in_sysfs_order(void)
 	CHECK_EQ(all.count, 2);
 	CHECK_STREQ(all.devs[0].id, "0000:00:01.2");
 	CHECK_EQ(all.devs[0].vendor, 0x8086);
+	CHECK(pci_is_bridge(&all.devs[0]));
 	CHECK_STREQ(all.devs[1].id, "0000:09:00.0");
 	CHECK_EQ(all.devs[1].device, 0x1041);
 	pci_list_free(&all);

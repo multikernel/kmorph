@@ -140,6 +140,78 @@ static int read_vmcore(const char *dir, struct vmcore_info *vi)
 	return ret;
 }
 
+static int read_device_u32(const char *dir, const char *node, const char *prop, uint32_t *v)
+{
+	char rel[NAME_MAX + 32];
+	void *cell;
+	size_t len;
+	int ret;
+
+	snprintf(rel, sizeof(rel), "devices/%s/%s", node, prop);
+	ret = read_optional(dir, rel, &cell, &len);
+	if (ret || !cell)
+		return ret;
+	if (len == sizeof(fdt32_t))
+		*v = fdt32_to_cpu(*(fdt32_t *)cell);
+	else
+		ret = -EINVAL;
+	free(cell);
+	return ret;
+}
+
+static int read_pci_device(const char *dir, const char *node, struct pci_ids *d)
+{
+	char path[PATH_MAX], *id;
+	size_t len;
+	int ret;
+
+	memset(d, 0, sizeof(*d));
+	snprintf(path, sizeof(path), "%s/devices/%s/pci-id", dir, node);
+	ret = file_read(path, (void **)&id, &len);
+	if (ret)
+		return ret;
+	ret = len && len <= sizeof(d->id) && !id[len - 1] ? 0 : -EINVAL;
+	if (!ret)
+		memcpy(d->id, id, len);
+	free(id);
+	if (!ret)
+		ret = read_device_u32(dir, node, "vendor-id", &d->vendor);
+	if (!ret)
+		ret = read_device_u32(dir, node, "device-id", &d->device);
+	if (!ret)
+		ret = read_device_u32(dir, node, "class-code", &d->class);
+	return ret;
+}
+
+static int pci_node_filter(const struct dirent *de)
+{
+	return !strncmp(de->d_name, "pci_", 4);
+}
+
+static int read_devices(const char *dir, struct pci_list *out)
+{
+	char path[PATH_MAX];
+	struct dirent **nodes;
+	int n, i, ret = 0;
+
+	snprintf(path, sizeof(path), "%s/devices", dir);
+	n = scandir(path, &nodes, pci_node_filter, alphasort);
+	if (n < 0)
+		return errno == ENOENT ? 0 : -errno;
+	out->devs = calloc(n + 1, sizeof(*out->devs));
+	if (!out->devs)
+		ret = -ENOMEM;
+	for (i = 0; i < n; i++) {
+		if (!ret)
+			ret = read_pci_device(dir, nodes[i]->d_name, &out->devs[out->count]);
+		if (!ret)
+			out->count++;
+		free(nodes[i]);
+	}
+	free(nodes);
+	return ret;
+}
+
 int host_tree_read(const char *dir, struct host_tree *ht)
 {
 	char path[PATH_MAX];
@@ -172,6 +244,9 @@ int host_tree_read(const char *dir, struct host_tree *ht)
 	if (ret)
 		goto fail;
 
+	ret = read_devices(dir, &ht->devices);
+	if (ret)
+		goto fail;
 	ret = read_vmcore(dir, &ht->vmcore);
 	if (ret)
 		goto fail;

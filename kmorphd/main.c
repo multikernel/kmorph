@@ -27,6 +27,7 @@
 #include "kmorph/log.h"
 #include "kmorph/mkfs.h"
 #include "kmorph/mksys.h"
+#include "kmorph/pci.h"
 #include "kmorph/probe.h"
 #include "kmorph/request.h"
 #include "kmorph/vsock.h"
@@ -273,6 +274,7 @@ static int daemon_setup(struct daemon *d)
 		.mem_path = DUMP_MEM_PATH,
 		.block_size_path = MEMORY_BLOCK_SIZE_PATH,
 		.dump_path = d->cfg.dump,
+		.pci_root = PCI_SYSFS_ROOT,
 		.fence_fn = mksys_fence,
 	};
 	int ret;

@@ -1,6 +1,8 @@
 #ifndef KMORPHD_OPS_H
 #define KMORPHD_OPS_H
 
+#include <stdbool.h>
+
 #include "kmorph/devtree.h"
 #include "kmorph/mkfs.h"
 #include "kmorph/takeable.h"
@@ -20,6 +22,7 @@ struct ops_env {
 	const char *mem_path;
 	const char *block_size_path;
 	const char *dump_path;		/* NULL: reap the predecessor's memory at once */
+	const char *pci_root;		/* this kernel's own PCI functions */
 	int (*fence_fn)(int mk_id);
 };
 
@@ -31,12 +34,15 @@ struct ops {
 	struct takeable takeable;
 	struct rangeset adoptable;	/* takeable memory in whole memory blocks */
 	struct rangeset preserved;	/* adoptable memory left unclaimed for now */
+	bool devices_tried;
+	size_t devices_adopted;
 };
 
 int ops_init(struct ops *o, const struct ops_env *env);
 void ops_free(struct ops *o);
 
 int ops_fence(struct ops *o);
+int ops_adopt_devices(struct ops *o);
 int ops_adopt(struct ops *o);
 int ops_preserve(struct ops *o);
 int ops_reap(struct ops *o);

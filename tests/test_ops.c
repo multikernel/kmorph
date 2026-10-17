@@ -11,6 +11,7 @@
 
 static char root[] = "/tmp/kmorph-test-ops-XXXXXX";
 static char devtree[512], sysfs[512], iomem[512], mem[512], dumpfile[512], blocksize[512];
+static char pci[512];
 static int fenced_ids[8], fenced_count;
 
 static int fake_fence(int mk_id)
@@ -40,10 +41,27 @@ static void mkdir_rel(const char *base, const char *rel)
 	mkdir(path, 0755);
 }
 
+static void put_host_device(const char *id, uint32_t class)
+{
+	char node[64], rel[128], *p;
+	fdt32_t cell = cpu_to_fdt32(class);
+
+	snprintf(node, sizeof(node), "chosen/multikernel,host-tree/devices/pci_%s", id);
+	for (p = node + strlen("chosen/multikernel,host-tree/devices/"); *p; p++)
+		if (*p == ':' || *p == '.')
+			*p = '_';
+	mkdir_rel(devtree, node);
+	snprintf(rel, sizeof(rel), "%s/pci-id", node);
+	put_rel(devtree, rel, id, strlen(id) + 1);
+	snprintf(rel, sizeof(rel), "%s/class-code", node);
+	put_rel(devtree, rel, &cell, sizeof(cell));
+}
+
 /*
  * Machine: RAM [0x1000, 0x10000) and [0x100000, 0x300000); the successor
  * owns [0x200000, 0x300000) and CPUs 4,5 of 0..5; control regions at
- * [0x8000, 0x9000).
+ * [0x8000, 0x9000). PCI: a root port at 00:01.0, a disk at 04:00.0 and
+ * NICs at 05:00.0 and 09:00.0, the last the successor's own.
  */
 static void populate(void)
 {
@@ -62,6 +80,13 @@ static void populate(void)
 	mkdir_rel(devtree, "chosen/multikernel,host-tree/memory@100000");
 	mkdir_rel(devtree, "chosen/multikernel,host-tree/vmcore");
 	mkdir_rel(devtree, "chosen/multikernel,host-tree/vmcore/cpu-notes");
+	mkdir_rel(devtree, "chosen/multikernel,host-tree/devices");
+	put_host_device("0000:00:01.0", 0x060400);
+	put_host_device("0000:04:00.0", 0x010802);
+	put_host_device("0000:05:00.0", 0x020000);
+	put_host_device("0000:09:00.0", 0x020000);
+	mkdir(pci, 0755);
+	mkdir_rel(pci, "0000:09:00.0");
 	put_rel(devtree, "model", "successor", 10);
 	put_rel(devtree, "id", &id, 4);
 	{
@@ -120,6 +145,7 @@ static void setup_env(const char *dump)
 	env.dump_path = dump;
 	env.block_size_path = blocksize;
 	env.fence_fn = fake_fence;
+	env.pci_root = pci;
 }
 
 static void *read_blob(const char *rel, size_t *len)
@@ -289,6 +315,72 @@ static void failed_dump_keeps_the_memory_unclaimed(void)
 	ops_free(&o);
 }
 
+/* The PCI id named by the last overlay written, which adds one device. */
+static void check_last_device_add(const char *id)
+{
+	void *dtbo;
+	size_t len;
+	int frag, ov, op, item;
+
+	dtbo = read_blob("overlays/new", &len);
+	frag = fdt_path_offset(dtbo, "/fragment@0");
+	CHECK_STREQ(fdt_getprop(dtbo, frag, "target-path", NULL), "/instances/successor");
+	ov = fdt_subnode_offset(dtbo, frag, "__overlay__");
+	op = fdt_subnode_offset(dtbo, ov, "device-add");
+	item = fdt_subnode_offset(dtbo, op, "pci@0");
+	CHECK_STREQ(fdt_getprop(dtbo, item, "pci-id", NULL), id);
+	free(dtbo);
+}
+
+static void adopt_devices_takes_every_function_it_lacks_but_bridges(void)
+{
+	struct ops o;
+
+	setup_env(NULL);
+	CHECK_EQ(ops_init(&o, &env), 0);
+	CHECK_EQ(ops_adopt_devices(&o), 0);
+	CHECK_EQ(o.devices_adopted, 2);
+	check_last_device_add("0000:05:00.0");
+	ops_free(&o);
+}
+
+static void a_device_that_fails_does_not_stop_the_others(void)
+{
+	struct ops o;
+
+	setup_env(NULL);
+	put_rel(sysfs, "overlays/tx_1/status", "failed\n", 7);
+	CHECK_EQ(ops_init(&o, &env), 0);
+	CHECK(ops_adopt_devices(&o) < 0);
+	CHECK_EQ(o.devices_adopted, 0);
+	check_last_device_add("0000:05:00.0");
+	ops_free(&o);
+	put_rel(sysfs, "overlays/tx_1/status", "applied\n", 8);
+}
+
+static void adopt_takes_devices_once_before_cpus_and_memory(void)
+{
+	struct ops o;
+	void *dtbo;
+	size_t len;
+	int frag, ov;
+
+	setup_env(NULL);
+	CHECK_EQ(ops_init(&o, &env), 0);
+	CHECK_EQ(ops_adopt(&o), 0);
+	CHECK_EQ(o.devices_adopted, 2);
+	dtbo = read_blob("overlays/new", &len);
+	frag = fdt_path_offset(dtbo, "/fragment@0");
+	ov = fdt_subnode_offset(dtbo, frag, "__overlay__");
+	CHECK(fdt_subnode_offset(dtbo, ov, "cpu-add") >= 0);
+	CHECK(fdt_subnode_offset(dtbo, ov, "device-add") < 0);
+	free(dtbo);
+
+	CHECK_EQ(ops_adopt(&o), 0);
+	CHECK_EQ(o.devices_adopted, 2);
+	ops_free(&o);
+}
+
 TEST_MAIN({
 	if (!mkdtemp(root)) {
 		perror("mkdtemp");
@@ -300,6 +392,7 @@ TEST_MAIN({
 	snprintf(mem, sizeof(mem), "%s/mem", root);
 	snprintf(dumpfile, sizeof(dumpfile), "%s/dump", root);
 	snprintf(blocksize, sizeof(blocksize), "%s/block_size_bytes", root);
+	snprintf(pci, sizeof(pci), "%s/pci", root);
 	populate();
 	RUN(init_reads_identity_and_host_tree);
 	RUN(init_fails_without_host_tree);
@@ -308,4 +401,7 @@ TEST_MAIN({
 	RUN(adopt_without_dump_takes_everything);
 	RUN(adopt_with_dump_keeps_memory_until_reaped);
 	RUN(failed_dump_keeps_the_memory_unclaimed);
+	RUN(adopt_devices_takes_every_function_it_lacks_but_bridges);
+	RUN(a_device_that_fails_does_not_stop_the_others);
+	RUN(adopt_takes_devices_once_before_cpus_and_memory);
 })

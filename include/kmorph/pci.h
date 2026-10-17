@@ -1,6 +1,7 @@
 #ifndef KMORPH_PCI_H
 #define KMORPH_PCI_H
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -11,6 +12,7 @@ struct pci_ids {
 	char id[16];		/* dddd:bb:ss.f */
 	uint32_t vendor;
 	uint32_t device;
+	uint32_t class;		/* base class, subclass, prog-if */
 };
 
 struct pci_list {
@@ -19,6 +21,7 @@ struct pci_list {
 };
 
 int pci_read_ids(const char *sysfs_root, const char *pci_id, struct pci_ids *out);
+bool pci_is_bridge(const struct pci_ids *d);
 
 /* Every PCI function under sysfs_root, in name order. */
 int pci_list_all(const char *sysfs_root, struct pci_list *out);

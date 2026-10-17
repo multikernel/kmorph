@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 #include "kmorph/dt.h"
 #include "kmorph/dump.h"
@@ -36,9 +37,10 @@ int ops_init(struct ops *o, const struct ops_env *env)
 		self_info_free(&o->self);
 		return ret;
 	}
-	log_info("instance %s (id %u): %zu own CPUs; host tree lists %zu CPUs, %zu RAM ranges; %zu reserved regions",
-		 o->self.name, o->self.id, o->self.own_cpus.count,
-		 o->host.cpus.count, o->host.ram.count, o->self.reserved.count);
+	log_info("instance %s (id %u): %zu own CPUs; host tree lists %zu CPUs, %zu RAM ranges, "
+		 "%zu PCI functions; %zu reserved regions",
+		 o->self.name, o->self.id, o->self.own_cpus.count, o->host.cpus.count,
+		 o->host.ram.count, o->host.devices.count, o->self.reserved.count);
 	return 0;
 }
 
@@ -122,13 +124,67 @@ static int apply_adopt(struct ops *o, const struct cpulist *cpus, const struct r
 	return ret;
 }
 
-/* With a dump configured the memory stays unclaimed until it is copied. */
+static bool owns_device(const struct ops *o, const char *id)
+{
+	char path[PATH_MAX];
+
+	snprintf(path, sizeof(path), "%s/%s", o->env.pci_root, id);
+	return access(path, F_OK) == 0;
+}
+
+/*
+ * Every function of the machine this kernel does not already own, but
+ * bridges: an adopted function sits on a root bus of its own, so there is
+ * nothing for a bridge to bridge. A device that cannot be taken leaves the
+ * others and the takeover to go on. Success is one line for them all, as
+ * /dev/kmsg drops a burst of more than ten.
+ */
+int ops_adopt_devices(struct ops *o)
+{
+	int first = 0;
+	size_t i;
+
+	for (i = 0; i < o->host.devices.count; i++) {
+		const struct pci_ids *d = &o->host.devices.devs[i];
+		void *dtbo;
+		size_t len;
+		int tx = -1, ret;
+
+		if (pci_is_bridge(d) || owns_device(o, d->id))
+			continue;
+		ret = dt_build_adopt_device(o->self.name, d->id, &dtbo, &len);
+		if (!ret) {
+			ret = mkfs_apply_overlay(&o->fs, dtbo, len, &tx);
+			free(dtbo);
+		}
+		if (ret) {
+			log_err("device %s not adopted (tx %d): %s", d->id, tx, strerror(-ret));
+			if (!first)
+				first = ret;
+			continue;
+		}
+		o->devices_adopted++;
+	}
+	log_info("adopted %zu devices", o->devices_adopted);
+	return first;
+}
+
+/*
+ * Devices come first: the driver that probes one resets it, stopping
+ * whatever DMA the predecessor left running before its memory is
+ * hot-added. With a dump configured the memory stays unclaimed until it
+ * is copied.
+ */
 int ops_adopt(struct ops *o)
 {
 	struct rangeset none = RANGESET_INIT;
 	const struct rangeset *now = &o->adoptable;
 	int ret;
 
+	if (!o->devices_tried) {
+		o->devices_tried = true;
+		ops_adopt_devices(o);
+	}
 	ret = plan_adoption(o);
 	if (ret)
 		return ret;

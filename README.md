@@ -151,7 +151,7 @@ programs read the same file; each uses the keys for its side. `kernel`,
 | `kernel` | | Kernel image: an ELF vmlinux, or a bzImage from which the vmlinux is extracted. |
 | `initrd` | `/var/lib/kmorph/successor.img` | Initramfs for the successor; the default is what `kmorph init` writes. kmorph appends the config to whichever image is used. |
 | `cmdline` | | Kernel command line for the successor. See [Successor console](#successor-console). With `dump` set, kmorph adds `iomem=relaxed`, which the successor needs to read the predecessor's memory through `/dev/mem` on kernels built with `IO_STRICT_DEVMEM`. |
-| `devices` | | Devices handed to the successor, comma separated, as PCI addresses (`0000:09:00.0`) or as the names sysfs knows them by: a network interface (`enp61s0f1`), a block device (`nvme0n1`), a framebuffer (`fb0`), a USB bus (`usb1`). A name resolves to the PCI function behind it; the successor only ever sees the address. Give it its own NIC and disk. |
+| `devices` | | Devices handed to the successor, comma separated, as PCI addresses (`0000:09:00.0`) or as the names sysfs knows them by: a network interface (`enp61s0f1`), a block device (`nvme0n1`), a framebuffer (`fb0`), a USB bus (`usb1`). A name resolves to the PCI function behind it; the successor only ever sees the address. The successor owns these from boot, a NIC to be reachable while armed for instance; it adopts every other device at the takeover. |
 | `machine_cpus` | from the MADT | Every CPU on the machine. Set only on a machine without ACPI. |
 | `modules` | | Kernel modules the distro image builders add to the successor image, comma separated: the vsock transport when it is a module, drivers for devices in `devices`. The `kmorph init` image has no module loader and ignores it. |
 | `console` | | Serial line the successor takes over after the crash, e.g. `ttyS0`. |
@@ -243,11 +243,18 @@ FENCE_FAILED, FENCED and TAKEN_OVER.
    confirms each one parked. A CPU that never parks fails the fence, which
    is retried on the next probe up to `fence_retries` times; the takeover
    never proceeds with a CPU possibly still running the dead kernel.
-3. **Adoption.** The successor computes what is takeable, the machine's RAM
-   minus its own minus the kernel's control regions, and every CPU it does
-   not own, and claims it in one transaction. Fenced CPUs are woken from the
-   predecessor's park slot; memory is hot-added in whole memory blocks,
-   128 MB on x86.
+3. **Adoption.** Devices come first: every PCI function the predecessor
+   described in the host tree at arm time that the successor does not
+   already own, bridges aside, each in a transaction of its own, so one
+   that cannot be taken holds up neither the others nor the takeover.
+   The successor's kernel puts each on a root bus of its own, reaches its
+   config space through the bus's ECAM window, and binds its driver,
+   which resets the device and so stops whatever DMA the predecessor
+   left running. Then the successor computes
+   what is takeable, the machine's RAM minus its own minus the kernel's
+   control regions, and every CPU it does not own, and claims it in one
+   transaction. Fenced CPUs are woken from the predecessor's park slot;
+   memory is hot-added in whole memory blocks, 128 MB on x86.
 4. **Dump and reclaim.** With `dump` set, memory is left unclaimed until it
    has been written to the dump file through `/dev/mem`, then reclaimed.
    The file is an ELF core in the format of kdump's `/proc/vmcore`: one
@@ -271,9 +278,11 @@ one of the kernel's control regions cannot be hot-added and stay unclaimed;
 on a 2 GB machine that is about 500 MB, on a large machine a fixed few
 hundred megabytes. Unclaimed memory remains readable through `/dev/mem`.
 
-The successor keeps the devices it was armed with. Devices that belonged to
-the predecessor are not adopted, so the successor needs its own NIC and
-disk from the start.
+The successor keeps the devices it was armed with and gains every other
+PCI function of the machine but the bridges. Each sits on a root bus of
+its own with nothing of the bridges above it, so the successor has no
+secondary bus reset, hotplug or AER for it. A device the machine gained
+after `kmorph arm` is not in the host tree and stays as the crash left it.
 
 ### Inspecting the dump
 
@@ -329,7 +338,8 @@ the panic, the takeover, and the successor's login prompt.
 
 - Exactly two kernels: one predecessor, one successor.
 - No automatic re-arming after a takeover.
-- No device takeover; the successor runs on the devices it was armed with.
+- No adopted device is reset before its driver probes it, and one the
+  successor has no driver for keeps whatever DMA it was doing.
 - Memory is adopted in whole 128 MB blocks; the remainder stays unclaimed.
 - The dump is not filtered; makedumpfile can shrink it afterwards.
 - `kmorph upgrade`, a planned takeover for a zero-downtime kernel upgrade,

@@ -33,6 +33,8 @@ int dt_emit_pci_devices(void *fdt, const struct pci_list *devices);
 int dt_build_instance_remove(const char *name, void **dtbo, size_t *len);
 int dt_build_adopt(const char *name, const struct cpulist *cpus,
 		   const struct rangeset *memory, void **dtbo, size_t *len);
+/* One function of the fenced predecessor, so that each succeeds or fails alone. */
+int dt_build_adopt_device(const char *name, const char *pci_id, void **dtbo, size_t *len);
 
 /* Baselines for /sys/fs/multikernel/device_tree */
 int dt_build_pool_baseline(const struct cpulist *cpus, uint64_t memory_bytes,

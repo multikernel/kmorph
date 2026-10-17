@@ -137,6 +137,8 @@ static void put_pci_device(const char *id, const char *vendor, const char *devic
 	CHECK_EQ(file_write(path, vendor, strlen(vendor)), 0);
 	snprintf(path, sizeof(path), "%s/%s/device", pci_root, id);
 	CHECK_EQ(file_write(path, device, strlen(device)), 0);
+	snprintf(path, sizeof(path), "%s/%s/class", pci_root, id);
+	CHECK_EQ(file_write(path, "0x020000\n", 9), 0);
 }
 
 
