@@ -375,9 +375,14 @@ bool arm_memory_fits(uint64_t memory, size_t image_len)
 	return memory / 3 >= image_len;
 }
 
-/* The image, then the one thing only arm knows: the config. */
+/*
+ * The image, then the one thing only arm knows: the config. The kernel
+ * takes a cpio header only at a 4-byte aligned offset and skips zeros
+ * to reach one, so an image of odd length is padded.
+ */
 static int successor_initrd(const struct kmorph_config *cfg, const struct arm_hooks *h)
 {
+	static const char zeros[3];
 	const char *path = cfg->initrd ? cfg->initrd : h->default_initrd;
 	struct cpio extra = CPIO_INIT;
 	void *image;
@@ -405,6 +410,8 @@ static int successor_initrd(const struct kmorph_config *cfg, const struct arm_ho
 		goto out;
 	}
 	ret = write_all(fd, image, len);
+	if (!ret)
+		ret = write_all(fd, zeros, (4 - (len & 3)) & 3);
 	if (!ret)
 		ret = write_all(fd, extra.data, extra.len);
 	if (ret) {

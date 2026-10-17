@@ -722,8 +722,9 @@ static void arm_uses_the_configured_initrd_over_the_default(void)
 	CHECK_EQ(arm_run(&cfg, &fs, &hooks), 0);
 	CHECK(calls.initrd_len > 17);
 	CHECK(memcmp(calls.initrd, "OTHER-IMAGE-BYTES", 17) == 0);
+	CHECK(memcmp(calls.initrd + 17, "\0\0\0", 3) == 0);
 	{
-		size_t off = 17;
+		size_t off = 20;
 
 		CHECK_EQ(cpio_next(calls.initrd, calls.initrd_len, &off, &e), 1);
 		CHECK_STREQ(e.name, "etc");
