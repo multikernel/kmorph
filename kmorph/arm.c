@@ -116,23 +116,24 @@ static int lookup_devices(const struct kmorph_config *cfg, const char *pci_root,
 }
 
 /*
- * A new pool holds the successor's memory plus one memory block: the
- * kernel carves its pool park area out of pool memory, so a pool sized
- * exactly to the successor comes up a few pages short.
+ * A new pool holds the successor's memory plus one memory granule: the
+ * kernel carves its pool park area out of pool
+ * memory, so a pool sized exactly to the successor comes up a few pages
+ * short.
  */
 static int init_pool(const struct kmorph_config *cfg, const struct mkfs *fs,
 		     const struct arm_hooks *h)
 {
 	struct pci_list devices;
 	struct strlist platform;
-	uint64_t block, pool_bytes;
+	uint64_t granule, pool_bytes;
 	void *dtb;
 	size_t len;
 	int ret;
 
-	if (memblock_size(h->block_size_path, &block))
-		block = MEMORY_BLOCK_SIZE_FALLBACK;
-	pool_bytes = cfg->memory + block;
+	if (memory_granule(fs, h->block_size_path, &granule))
+		granule = MEMORY_BLOCK_SIZE_FALLBACK;
+	pool_bytes = cfg->memory + granule;
 
 	ret = lookup_devices(cfg, h->pci_root, &devices);
 	if (ret)

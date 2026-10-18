@@ -42,6 +42,17 @@ static inline void fdt_test_u64_array(void *fdt, const char *name,
 		abort();
 }
 
+/* A kernel's own tree, saying only the unit memory moves in or out in */
+static inline void *fdt_test_granule_tree(uint64_t granule)
+{
+	void *fdt = fdt_test_begin(512);
+
+	if (fdt_property_u64(fdt, "memory-granule", granule))
+		abort();
+	fdt_test_finish(fdt);
+	return fdt;
+}
+
 static inline uint64_t fdt_test_get_u64(const void *fdt, int node, const char *name, int idx)
 {
 	int len;

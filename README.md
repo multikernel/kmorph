@@ -193,7 +193,7 @@ Run it once after installing kmorph and again after upgrading it or changing
 
 **arm** prepares the machine and boots the successor. If the machine has no
 multikernel pool yet, kmorph mounts `/sys/fs/multikernel`, and creates a
-pool holding the successor's CPUs, its memory plus one memory block of
+pool holding the successor's CPUs, its memory plus a few megabytes of
 headroom for the kernel's own use, its devices, and the serial device when
 `console` is set. If a pool exists, kmorph uses it and adds any configured
 PCI device the pool lacks. It then creates the instance, loads the kernel
@@ -255,7 +255,9 @@ FENCE_FAILED, FENCED and TAKEN_OVER.
    what is takeable, the machine's RAM minus its own minus the kernel's
    control regions, and every CPU it does not own, and claims it in one
    transaction. Fenced CPUs are woken from the predecessor's park slot;
-   memory is hot-added in whole memory blocks, 128 MB on x86.
+   memory is hot-added in units of the `memory-granule` the kernel
+   publishes in its multikernel device tree, 4 MB on x86, or in whole
+   memory blocks, 128 MB on x86, from a kernel that does not.
 4. **Dump and reclaim.** With `dump` set, memory is left unclaimed until it
    has been written to the dump file through `/dev/mem`, then reclaimed.
    The file is an ELF core in the format of kdump's `/proc/vmcore`: one
@@ -273,11 +275,12 @@ is itself unprotected until an operator arms a new successor.
 
 ### What the successor ends up with
 
-Every CPU, and all memory that forms whole memory blocks. Blocks that
-contain the first megabyte, the top of RAM, the successor's own memory or
-one of the kernel's control regions cannot be hot-added and stay unclaimed;
-on a 2 GB machine that is about 500 MB, on a large machine a fixed few
-hundred megabytes. Unclaimed memory remains readable through `/dev/mem`.
+Every CPU, and all memory that forms whole memory granules. The granules
+that contain the first megabyte, the top of RAM, the successor's own
+memory or one of the kernel's control regions cannot be hot-added and stay
+unclaimed; at 4 MB that is a few megabytes around each, at whole memory
+blocks on a 2 GB machine about 500 MB. Unclaimed memory remains readable
+through `/dev/mem`.
 
 The successor keeps the devices it was armed with and gains every other
 PCI function of the machine but the bridges. Each sits on a root bus of

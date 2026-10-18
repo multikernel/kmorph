@@ -504,6 +504,13 @@ int dt_read_pool(const void *fdt, size_t len, struct pool_view *v)
 	return ret;
 }
 
+int dt_read_memory_granule(const void *fdt, size_t len, uint64_t *granule)
+{
+	if (fdtutil_check(fdt, len))
+		return -EINVAL;
+	return fdtutil_read_u64(fdt, 0, "memory-granule", granule);
+}
+
 void pool_view_free(struct pool_view *v)
 {
 	cpulist_free(&v->free_cpus);

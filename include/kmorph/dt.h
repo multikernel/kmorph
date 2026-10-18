@@ -55,4 +55,7 @@ struct pool_view {
 int dt_read_pool(const void *fdt, size_t len, struct pool_view *v);
 void pool_view_free(struct pool_view *v);
 
+/* The unit memory moves into or out of the kernel whose own tree this is in */
+int dt_read_memory_granule(const void *fdt, size_t len, uint64_t *granule);
+
 #endif

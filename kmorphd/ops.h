@@ -20,7 +20,7 @@ struct ops_env {
 	const char *sysfs_root;
 	const char *iomem_path;
 	const char *mem_path;
-	const char *block_size_path;
+	const char *block_size_path;	/* for a kernel that does not publish its memory granule */
 	const char *dump_path;		/* NULL: reap the predecessor's memory at once */
 	const char *pci_root;		/* this kernel's own PCI functions */
 	int (*fence_fn)(int mk_id);
@@ -32,7 +32,7 @@ struct ops {
 	struct self_info self;
 	struct host_tree host;
 	struct takeable takeable;
-	struct rangeset adoptable;	/* takeable memory in whole memory blocks */
+	struct rangeset adoptable;	/* takeable memory the kernel can hot-add */
 	struct rangeset preserved;	/* adoptable memory left unclaimed for now */
 	bool devices_tried;
 	size_t devices_adopted;

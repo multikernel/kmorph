@@ -66,14 +66,14 @@ int ops_fence(struct ops *o)
 
 /*
  * What the fenced predecessor leaves takeable, and the part of it the
- * kernel can hot-add: memory joins in whole memory blocks, so the
- * slivers around control regions and the successor's own RAM stay
- * unclaimed, still readable through /dev/mem.
+ * kernel can hot-add: memory joins only in whole units of the kernel's
+ * memory granule, so the slivers around control regions and the successor's
+ * own RAM stay unclaimed, still readable through /dev/mem.
  */
 static int plan_adoption(struct ops *o)
 {
 	struct rangeset own_ram = RANGESET_INIT;
-	uint64_t block;
+	uint64_t granule;
 	int ret;
 
 	takeable_free(&o->takeable);
@@ -89,14 +89,14 @@ static int plan_adoption(struct ops *o)
 		return ret;
 	}
 
-	ret = memblock_size(o->env.block_size_path, &block);
+	ret = memory_granule(&o->fs, o->env.block_size_path, &granule);
 	if (!ret)
-		ret = rangeset_align(&o->takeable.memory, block, &o->adoptable);
+		ret = rangeset_align(&o->takeable.memory, granule, &o->adoptable);
 	if (ret) {
-		log_err("cannot align to the memory block size: %s", strerror(-ret));
+		log_err("cannot align to the memory granule: %s", strerror(-ret));
 		return ret;
 	}
-	log_info("takeable: %zu CPUs, %llu MB in %zu ranges, %llu MB adoptable in %zu blocks",
+	log_info("takeable: %zu CPUs, %llu MB in %zu ranges, %llu MB adoptable in %zu ranges",
 		 o->takeable.cpus.count,
 		 (unsigned long long)rangeset_total(&o->takeable.memory) >> 20,
 		 o->takeable.memory.count,

@@ -646,7 +646,7 @@ static void arm_initialises_the_pool_when_there_is_none(void)
 	res = fdt_path_offset(dtb, "/resources");
 	CHECK(res >= 0);
 	CHECK_EQ(fdt_test_get_u64(dtb, res, "cpus", 0), 12);
-	/* One memory block of headroom: the pool park area lives in pool memory. */
+	/* A kernel publishing no memory granule gets a memory block of headroom. */
 	CHECK_EQ(fdt_test_get_u64(dtb, fdt_subnode_offset(dtb, res, "memory@0"), "size", 0),
 		 (4ULL << 30) + (128ULL << 20));
 	devs = fdt_subnode_offset(dtb, res, "devices");
@@ -654,6 +654,29 @@ static void arm_initialises_the_pool_when_there_is_none(void)
 	dev = fdt_first_subnode(dtb, devs);
 	CHECK_STREQ(fdt_getprop(dtb, dev, "pci-id", NULL), "0000:09:00.0");
 	CHECK_EQ(fdt32_to_cpu(*(const fdt32_t *)fdt_getprop(dtb, dev, "vendor-id", &plen)), 0x1af4);
+	free(dtb);
+	config_free(&cfg);
+}
+
+static void new_pool_headroom_is_one_memory_granule(void)
+{
+	void *tree = fdt_test_granule_tree(4ULL << 20);
+	struct mkfs fs = { sysfs };
+	char err[64];
+	void *dtb;
+	size_t len;
+	int res;
+
+	setup();
+	config_free(&cfg);
+	config_parse("cpus = 12-15\nmemory = 4GB\nkernel = /boot/vmlinuz\n", &cfg, err, sizeof(err));
+	put("device_tree", tree, fdt_totalsize(tree));
+	free(tree);
+	CHECK_EQ(arm_run(&cfg, &fs, &hooks), 0);
+	dtb = read_blob("device_tree", &len);
+	res = fdt_path_offset(dtb, "/resources");
+	CHECK_EQ(fdt_test_get_u64(dtb, fdt_subnode_offset(dtb, res, "memory@0"), "size", 0),
+		 (4ULL << 30) + (4ULL << 20));
 	free(dtb);
 	config_free(&cfg);
 }
@@ -888,6 +911,7 @@ TEST_MAIN({
 	RUN(arm_refuses_cpus_outside_the_pool);
 	RUN(arm_refuses_more_memory_than_free);
 	RUN(arm_initialises_the_pool_when_there_is_none);
+	RUN(new_pool_headroom_is_one_memory_granule);
 	RUN(arm_refuses_a_pool_baseline_with_an_unknown_device);
 	RUN(missing_pool_devices_are_added_by_overlay);
 	RUN(arm_uses_the_configured_initrd_over_the_default);

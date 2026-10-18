@@ -1,6 +1,7 @@
 #include <errno.h>
 #include <stdlib.h>
 
+#include "kmorph/dt.h"
 #include "kmorph/file.h"
 #include "kmorph/memblock.h"
 
@@ -16,4 +17,24 @@ int memblock_size(const char *path, uint64_t *block)
 	ret = (*end || !*block) ? -EINVAL : 0;
 	free(text);
 	return ret;
+}
+
+/*
+ * A kernel that does not publish its granule takes memory in whole
+ * blocks only, which is also a safe answer for any kernel that does.
+ */
+int memory_granule(const struct mkfs *fs, const char *block_size_path, uint64_t *granule)
+{
+	void *tree;
+	size_t len;
+	int ret;
+
+	ret = mkfs_read_root_tree(fs, &tree, &len);
+	if (!ret) {
+		ret = len ? dt_read_memory_granule(tree, len, granule) : -ENOENT;
+		free(tree);
+	}
+	if (!ret && *granule && !(*granule & (*granule - 1)))
+		return 0;
+	return memblock_size(block_size_path, granule);
 }

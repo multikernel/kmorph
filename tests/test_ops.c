@@ -227,6 +227,28 @@ static void adopt_computes_takeable_and_aligns_to_blocks(void)
 	put(blocksize, "1000\n", 5);
 }
 
+static void adopt_aligns_to_the_memory_granule(void)
+{
+	void *tree = fdt_test_granule_tree(0x1000);
+	struct ops o;
+	size_t i;
+
+	setup_env(NULL);
+	put(blocksize, "100000\n", 7);
+	put_rel(sysfs, "device_tree", tree, fdt_totalsize(tree));
+	CHECK_EQ(ops_init(&o, &env), 0);
+	CHECK_EQ(ops_adopt(&o), 0);
+	CHECK_EQ(o.adoptable.count, o.takeable.memory.count);
+	for (i = 0; i < o.adoptable.count; i++) {
+		CHECK_EQ(o.adoptable.r[i].base, o.takeable.memory.r[i].base);
+		CHECK_EQ(o.adoptable.r[i].size, o.takeable.memory.r[i].size);
+	}
+	ops_free(&o);
+	free(tree);
+	put_rel(sysfs, "device_tree", "", 0);
+	put(blocksize, "1000\n", 5);
+}
+
 static void adopt_without_dump_takes_everything(void)
 {
 	struct ops o;
@@ -398,6 +420,7 @@ TEST_MAIN({
 	RUN(init_fails_without_host_tree);
 	RUN(fence_targets_the_predecessor);
 	RUN(adopt_computes_takeable_and_aligns_to_blocks);
+	RUN(adopt_aligns_to_the_memory_granule);
 	RUN(adopt_without_dump_takes_everything);
 	RUN(adopt_with_dump_keeps_memory_until_reaped);
 	RUN(failed_dump_keeps_the_memory_unclaimed);
