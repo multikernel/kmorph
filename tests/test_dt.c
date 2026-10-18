@@ -312,52 +312,53 @@ static void foreign_baseline_names_takeable_by_reg(void)
 	rangeset_free(&t.memory);
 }
 
+static void put_pci_function(void *fdt, const char *name, unsigned int bus,
+			     unsigned int devfn, uint32_t vendor)
+{
+	fdt32_t reg[5] = { cpu_to_fdt32(bus << 16 | devfn << 8) };
+
+	fdt_begin_node(fdt, name);
+	fdt_property(fdt, "reg", reg, sizeof(reg));
+	fdt_property_u32(fdt, "vendor-id", vendor);
+	fdt_property_u32(fdt, "device-id", 0x1041);
+	fdt_end_node(fdt);
+}
+
+static void put_host_bridge(void *fdt, const char *name, unsigned int domain)
+{
+	fdt_begin_node(fdt, name);
+	fdt_property_string(fdt, "compatible", "multikernel,pci-host-bridge");
+	fdt_property_u32(fdt, "linux,pci-domain", domain);
+}
+
 static void *build_root_tree(void)
 {
 	void *fdt = fdt_test_begin(4096);
+	uint64_t members[] = { 8, 9, 12, 13, 14, 15 };
 	uint64_t free_cpus[] = { 12, 13, 14, 15 };
 	uint64_t inst_cpus[] = { 8, 9 };
 
 	fdt_begin_node(fdt, "resources");
-	fdt_test_u64_array(fdt, "cpus", free_cpus, 4);
+	fdt_test_u64_array(fdt, "cpus", members, 6);
+	fdt_test_u64_array(fdt, "cpus-available", free_cpus, 4);
 	fdt_begin_node(fdt, "memory@100000000");
 	fdt_property_string(fdt, "device_type", "memory");
 	fdt_test_reg(fdt, 0x100000000, 8ULL << 30);
 	fdt_end_node(fdt);
-	/* The pool's PCI devices, as the kernel describes them: a topology. */
 	fdt_begin_node(fdt, "devices");
-	fdt_begin_node(fdt, "pci@0");
-	fdt_property_string(fdt, "compatible", "multikernel,pci-host-bridge");
-	fdt_property_u32(fdt, "linux,pci-domain", 0);
-	fdt_begin_node(fdt, "pci@3,0");
-	fdt_property_string(fdt, "device_type", "pci");
-	{
-		fdt32_t reg[5] = { cpu_to_fdt32(0 << 16 | 0x18 << 8) };
-		fdt_property(fdt, "reg", reg, sizeof(reg));
-	}
-	fdt_begin_node(fdt, "pci@0,0");
-	{
-		fdt32_t reg[5] = { cpu_to_fdt32(9 << 16 | 0 << 8) };
-		fdt_property(fdt, "reg", reg, sizeof(reg));
-	}
-	fdt_property_u32(fdt, "vendor-id", 0x1af4);
-	fdt_property_u32(fdt, "device-id", 0x1041);
-	fdt_end_node(fdt);
-	fdt_end_node(fdt);
-	fdt_begin_node(fdt, "pci@1,2");
-	{
-		fdt32_t reg[5] = { cpu_to_fdt32(0 << 16 | 0x0a << 8) };
-		fdt_property(fdt, "reg", reg, sizeof(reg));
-	}
-	fdt_property_u32(fdt, "vendor-id", 0x8086);
-	fdt_property_u32(fdt, "device-id", 0x1234);
-	fdt_end_node(fdt);
-	fdt_end_node(fdt);
 	fdt_begin_node(fdt, "serial8250");
 	fdt_property_string(fdt, "device-type", "platform");
 	fdt_property_string(fdt, "device-name", "serial8250");
 	fdt_end_node(fdt);
 	fdt_end_node(fdt);
+	fdt_end_node(fdt);
+
+	/* The pool's PCI functions, as the kernel describes them: a root bus each. */
+	put_host_bridge(fdt, "pci@0,9", 0);
+	put_pci_function(fdt, "pci@0,0", 9, 0x00, 0x1af4);
+	fdt_end_node(fdt);
+	put_host_bridge(fdt, "pci@0,0", 0);
+	put_pci_function(fdt, "pci@1,2", 0, 0x0a, 0x8086);
 	fdt_end_node(fdt);
 
 	fdt_begin_node(fdt, "instances");

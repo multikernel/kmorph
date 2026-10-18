@@ -412,59 +412,70 @@ static int strlist_push(struct strlist *l, const char *s)
 }
 
 /*
- * The kernel describes pooled PCI devices as a bus topology under each
- * host bridge: bridges carry a bus-range, leaves a vendor-id, and reg's
- * first cell holds bus and devfn as in the PCI binding.
+ * The kernel describes each bus holding a pooled PCI function as a root
+ * bus of its own, a host bridge node at the top of the tree with the
+ * functions right under it; reg's first cell holds bus and devfn as in
+ * the PCI binding.
  */
-static int collect_pci_leaves(const void *fdt, int parent, unsigned int domain,
-			      struct strlist *out)
+static int collect_pci_functions(const void *fdt, int bridge, struct strlist *out)
 {
+	const fdt32_t *dom = fdt_getprop(fdt, bridge, "linux,pci-domain", NULL);
+	unsigned int domain = dom ? fdt32_to_cpu(*dom) : 0;
 	int node;
 
-	fdt_for_each_subnode(node, fdt, parent) {
+	fdt_for_each_subnode(node, fdt, bridge) {
 		const fdt32_t *reg;
+		char id[16];
+		uint32_t hi;
 		int len, ret;
 
-		if (fdt_getprop(fdt, node, "vendor-id", NULL)) {
-			char id[16];
-			uint32_t hi;
-
-			reg = fdt_getprop(fdt, node, "reg", &len);
-			if (!reg || len < (int)sizeof(*reg))
-				return -EINVAL;
-			hi = fdt32_to_cpu(reg[0]);
-			snprintf(id, sizeof(id), "%04x:%02x:%02x.%x", domain,
-				 (hi >> 16) & 0xff, (hi >> 11) & 0x1f, (hi >> 8) & 0x7);
-			ret = strlist_push(out, id);
-		} else {
-			ret = collect_pci_leaves(fdt, node, domain, out);
-		}
+		if (!fdt_getprop(fdt, node, "vendor-id", NULL))
+			continue;
+		reg = fdt_getprop(fdt, node, "reg", &len);
+		if (!reg || len < (int)sizeof(*reg))
+			return -EINVAL;
+		hi = fdt32_to_cpu(reg[0]);
+		snprintf(id, sizeof(id), "%04x:%02x:%02x.%x", domain,
+			 (hi >> 16) & 0xff, (hi >> 11) & 0x1f, (hi >> 8) & 0x7);
+		ret = strlist_push(out, id);
 		if (ret)
 			return ret;
 	}
 	return 0;
 }
 
-static int collect_pool_devices(const void *fdt, int parent, struct strlist *out,
-				struct strlist *platform)
+static int collect_pool_pci(const void *fdt, struct strlist *out)
 {
 	int node;
 
-	fdt_for_each_subnode(node, fdt, parent) {
-		const char *type = fdt_getprop(fdt, node, "device-type", NULL);
+	fdt_for_each_subnode(node, fdt, 0) {
 		int ret;
 
-		if (type && !strcmp(type, "platform")) {
-			const char *name = fdt_getprop(fdt, node, "device-name", NULL);
+		if (fdt_node_check_compatible(fdt, node, PCI_HOST_BRIDGE_COMPATIBLE))
+			continue;
+		ret = collect_pci_functions(fdt, node, out);
+		if (ret)
+			return ret;
+	}
+	return 0;
+}
 
-			ret = strlist_push(platform, name ? name : fdt_get_name(fdt, node, NULL));
-		} else if (!fdt_node_check_compatible(fdt, node, PCI_HOST_BRIDGE_COMPATIBLE)) {
-			const fdt32_t *dom = fdt_getprop(fdt, node, "linux,pci-domain", NULL);
+static int collect_platform_devices(const void *fdt, int resources, struct strlist *out)
+{
+	int devices, node;
 
-			ret = collect_pci_leaves(fdt, node, dom ? fdt32_to_cpu(*dom) : 0, out);
-		} else {
-			ret = collect_pool_devices(fdt, node, out, platform);
-		}
+	devices = fdt_subnode_offset(fdt, resources, "devices");
+	if (devices < 0)
+		return 0;
+	fdt_for_each_subnode(node, fdt, devices) {
+		const char *type = fdt_getprop(fdt, node, "device-type", NULL);
+		const char *name;
+		int ret;
+
+		if (!type || strcmp(type, "platform"))
+			continue;
+		name = fdt_getprop(fdt, node, "device-name", NULL);
+		ret = strlist_push(out, name ? name : fdt_get_name(fdt, node, NULL));
 		if (ret)
 			return ret;
 	}
@@ -483,7 +494,7 @@ int dt_read_pool(const void *fdt, size_t len, struct pool_view *v)
 	if (resources < 0)
 		return -ENOENT;
 
-	ret = fdtutil_read_cpulist(fdt, resources, "cpus", &v->free_cpus);
+	ret = fdtutil_read_cpulist(fdt, resources, "cpus-available", &v->free_cpus);
 	if (ret == -ENOENT)
 		ret = 0;
 	if (ret)
@@ -498,7 +509,9 @@ int dt_read_pool(const void *fdt, size_t len, struct pool_view *v)
 	used = sum_instance_memory(fdt);
 	v->free_bytes = used < v->total_bytes ? v->total_bytes - used : 0;
 
-	ret = collect_pool_devices(fdt, resources, &v->devices, &v->platform_devices);
+	ret = collect_pool_pci(fdt, &v->devices);
+	if (!ret)
+		ret = collect_platform_devices(fdt, resources, &v->platform_devices);
 	if (ret)
 		pool_view_free(v);
 	return ret;

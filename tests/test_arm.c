@@ -105,7 +105,7 @@ static void put_root_tree(uint64_t free_bytes)
 	uint64_t free_cpus[] = { 12, 13, 14, 15 };
 
 	fdt_begin_node(fdt, "resources");
-	fdt_test_u64_array(fdt, "cpus", free_cpus, 4);
+	fdt_test_u64_array(fdt, "cpus-available", free_cpus, 4);
 	fdt_begin_node(fdt, "memory@100000000");
 	fdt_test_reg(fdt, 0x100000000, free_bytes);
 	fdt_end_node(fdt);
@@ -526,7 +526,7 @@ static void put_root_tree_with_serial(void)
 	uint64_t free_cpus[] = { 12, 13, 14, 15 };
 
 	fdt_begin_node(fdt, "resources");
-	fdt_test_u64_array(fdt, "cpus", free_cpus, 4);
+	fdt_test_u64_array(fdt, "cpus-available", free_cpus, 4);
 	fdt_begin_node(fdt, "memory@100000000");
 	fdt_property_string(fdt, "device_type", "memory");
 	fdt_test_reg(fdt, 0x100000000, 8ULL << 30);
