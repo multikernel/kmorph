@@ -169,6 +169,20 @@ static void modules_is_a_list_for_the_image_builders(void)
 	config_free(&c);
 }
 
+static void reset_devices_defaults_to_yes(void)
+{
+	struct kmorph_config c;
+	char err[128];
+
+	CHECK_EQ(config_parse("", &c, err, sizeof(err)), 0);
+	CHECK(c.reset_devices);
+	config_free(&c);
+	CHECK_EQ(config_parse("reset_devices = no\n", &c, err, sizeof(err)), 0);
+	CHECK(!c.reset_devices);
+	config_free(&c);
+	CHECK(config_parse("reset_devices = maybe\n", &c, err, sizeof(err)) < 0);
+}
+
 TEST_MAIN({
 	RUN(defaults_apply_when_keys_are_absent);
 	RUN(parses_every_key_with_comments_and_spacing);
@@ -181,4 +195,5 @@ TEST_MAIN({
 	RUN(parsed_text_is_kept_verbatim);
 	RUN(console_needs_a_login_program);
 	RUN(modules_is_a_list_for_the_image_builders);
+	RUN(reset_devices_defaults_to_yes);
 })

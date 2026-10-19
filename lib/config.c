@@ -15,6 +15,7 @@ static void config_defaults(struct kmorph_config *c)
 	c->probe_timeouts = 5;
 	c->fence_retries = 3;
 	c->console_baud = 115200;
+	c->reset_devices = true;
 }
 
 static int set_string(char **dst, const char *value)
@@ -38,6 +39,17 @@ static int set_uint(unsigned int *dst, const char *value, unsigned int min)
 	if (*end || v < min || v > UINT32_MAX)
 		return -EINVAL;
 	*dst = v;
+	return 0;
+}
+
+static int set_bool(bool *dst, const char *value)
+{
+	if (!strcmp(value, "yes"))
+		*dst = true;
+	else if (!strcmp(value, "no"))
+		*dst = false;
+	else
+		return -EINVAL;
 	return 0;
 }
 
@@ -77,6 +89,8 @@ static int config_set(struct kmorph_config *c, const char *key, const char *valu
 		return set_uint(&c->fence_retries, value, 0);
 	if (!strcmp(key, "dump"))
 		return set_string(&c->dump, value);
+	if (!strcmp(key, "reset_devices"))
+		return set_bool(&c->reset_devices, value);
 	if (!strcmp(key, "console"))
 		return set_string(&c->console, value);
 	if (!strcmp(key, "console_baud"))

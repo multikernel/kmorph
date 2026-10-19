@@ -86,7 +86,10 @@ static void populate(void)
 	put_host_device("0000:05:00.0", 0x020000);
 	put_host_device("0000:09:00.0", 0x020000);
 	mkdir(pci, 0755);
-	mkdir_rel(pci, "0000:09:00.0");
+	mkdir_rel(pci, "devices");
+	mkdir_rel(pci, "devices/0000:09:00.0");
+	put_rel(pci, "drivers_autoprobe", "1", 1);
+	put_rel(pci, "drivers_probe", "", 0);
 	put_rel(devtree, "model", "successor", 10);
 	put_rel(devtree, "id", &id, 4);
 	{
@@ -145,17 +148,23 @@ static void setup_env(const char *dump)
 	env.dump_path = dump;
 	env.block_size_path = blocksize;
 	env.fence_fn = fake_fence;
-	env.pci_root = pci;
+	env.pci_bus = pci;
+	env.reset_devices = false;
 }
 
-static void *read_blob(const char *rel, size_t *len)
+static void *read_blob_at(const char *base, const char *rel, size_t *len)
 {
 	char path[1024];
 	void *blob;
 
-	snprintf(path, sizeof(path), "%s/%s", sysfs, rel);
+	snprintf(path, sizeof(path), "%s/%s", base, rel);
 	CHECK_EQ(file_read(path, &blob, len), 0);
 	return blob;
+}
+
+static void *read_blob(const char *rel, size_t *len)
+{
+	return read_blob_at(sysfs, rel, len);
 }
 
 static void init_reads_identity_and_host_tree(void)
@@ -403,6 +412,84 @@ static void adopt_takes_devices_once_before_cpus_and_memory(void)
 	ops_free(&o);
 }
 
+static char *read_text(const char *base, const char *rel)
+{
+	char path[1024], *text;
+
+	snprintf(path, sizeof(path), "%s/%s", base, rel);
+	CHECK_EQ(file_read_string(path, &text), 0);
+	return text;
+}
+
+static void remove_rel(const char *base, const char *rel)
+{
+	char path[1024];
+
+	snprintf(path, sizeof(path), "%s/%s", base, rel);
+	CHECK_EQ(remove(path), 0);
+}
+
+/*
+ * The kernel would create each adopted function under devices; here
+ * 04:00.0 can be reset and 05:00.0 cannot, so it is only quiesced.
+ */
+static void reset_devices_resets_each_before_its_driver_probes(void)
+{
+	uint8_t config[64] = { [4] = 0x07, [5] = 0x01 }, *after;
+	struct ops o;
+	size_t len;
+	char *text;
+
+	setup_env(NULL);
+	env.reset_devices = true;
+	put_rel(pci, "drivers_autoprobe", "1", 1);
+	CHECK_EQ(ops_init(&o, &env), 0);
+	CHECK_EQ(o.foreign_count, 2);
+	mkdir_rel(pci, "devices/0000:04:00.0");
+	put_rel(pci, "devices/0000:04:00.0/reset", "", 0);
+	mkdir_rel(pci, "devices/0000:05:00.0");
+	put_rel(pci, "devices/0000:05:00.0/config", config, sizeof(config));
+
+	CHECK_EQ(ops_adopt_devices(&o), 0);
+	CHECK_EQ(o.devices_adopted, 2);
+	text = read_text(pci, "devices/0000:04:00.0/reset");
+	CHECK_STREQ(text, "1");
+	free(text);
+	after = read_blob_at(pci, "devices/0000:05:00.0/config", &len);
+	CHECK_EQ(after[4], 0x03);
+	CHECK_EQ(after[5], 0x01);
+	free(after);
+	text = read_text(pci, "drivers_autoprobe");
+	CHECK_STREQ(text, "1");
+	free(text);
+	text = read_text(pci, "drivers_probe");
+	CHECK_STREQ(text, "0000:05:00.0");
+	free(text);
+	ops_free(&o);
+
+	remove_rel(pci, "devices/0000:04:00.0/reset");
+	remove_rel(pci, "devices/0000:04:00.0");
+	remove_rel(pci, "devices/0000:05:00.0/config");
+	remove_rel(pci, "devices/0000:05:00.0");
+	put_rel(pci, "drivers_probe", "", 0);
+}
+
+static void without_reset_drivers_bind_as_devices_join(void)
+{
+	struct ops o;
+	char *text;
+
+	setup_env(NULL);
+	put_rel(pci, "drivers_autoprobe", "untouched", 9);
+	CHECK_EQ(ops_init(&o, &env), 0);
+	CHECK_EQ(ops_adopt_devices(&o), 0);
+	text = read_text(pci, "drivers_autoprobe");
+	CHECK_STREQ(text, "untouched");
+	free(text);
+	ops_free(&o);
+	put_rel(pci, "drivers_autoprobe", "1", 1);
+}
+
 TEST_MAIN({
 	if (!mkdtemp(root)) {
 		perror("mkdtemp");
@@ -427,4 +514,6 @@ TEST_MAIN({
 	RUN(adopt_devices_takes_every_function_it_lacks_but_bridges);
 	RUN(a_device_that_fails_does_not_stop_the_others);
 	RUN(adopt_takes_devices_once_before_cpus_and_memory);
+	RUN(reset_devices_resets_each_before_its_driver_probes);
+	RUN(without_reset_drivers_bind_as_devices_join);
 })

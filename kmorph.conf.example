@@ -53,6 +53,10 @@ memory  = 128MB
 # reclaimed. A FIFO works. Unset: reclaim at once.
 #dump = /var/crash/predecessor.vmcore
 
+# Reset each adopted device before its driver binds, or clear its bus
+# mastering if it cannot be reset. no: leave it as the crash left it.
+#reset_devices = yes
+
 # Serial line the successor takes over after the crash.
 #console = ttyS0
 

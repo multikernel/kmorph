@@ -274,7 +274,8 @@ static int daemon_setup(struct daemon *d)
 		.mem_path = DUMP_MEM_PATH,
 		.block_size_path = MEMORY_BLOCK_SIZE_PATH,
 		.dump_path = d->cfg.dump,
-		.pci_root = PCI_SYSFS_ROOT,
+		.pci_bus = PCI_BUS_ROOT,
+		.reset_devices = d->cfg.reset_devices,
 		.fence_fn = mksys_fence,
 	};
 	int ret;

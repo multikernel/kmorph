@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #include "kmorph/dt.h"
@@ -12,7 +13,31 @@
 #include "kmorph/log.h"
 #include "kmorph/memblock.h"
 #include "kmorph/mksys.h"
+#include "kmorph/pci.h"
 #include "ops.h"
+
+/*
+ * Every function of the machine this kernel was not booted with, but
+ * bridges: an adopted function sits on a root bus of its own, so there is
+ * nothing for a bridge to bridge.
+ */
+static int list_foreign(struct ops *o)
+{
+	char path[PATH_MAX];
+	size_t i;
+
+	o->foreign = calloc(o->host.devices.count + 1, sizeof(*o->foreign));
+	if (!o->foreign)
+		return -ENOMEM;
+	for (i = 0; i < o->host.devices.count; i++) {
+		const struct pci_ids *d = &o->host.devices.devs[i];
+
+		snprintf(path, sizeof(path), "%s/devices/%s", o->env.pci_bus, d->id);
+		if (!pci_is_bridge(d) && access(path, F_OK))
+			o->foreign[o->foreign_count++] = d->id;
+	}
+	return 0;
+}
 
 int ops_init(struct ops *o, const struct ops_env *env)
 {
@@ -37,6 +62,11 @@ int ops_init(struct ops *o, const struct ops_env *env)
 		self_info_free(&o->self);
 		return ret;
 	}
+	ret = list_foreign(o);
+	if (ret) {
+		ops_free(o);
+		return ret;
+	}
 	log_info("instance %s (id %u): %zu own CPUs; host tree lists %zu CPUs, %zu RAM ranges, "
 		 "%zu PCI functions; %zu reserved regions",
 		 o->self.name, o->self.id, o->self.own_cpus.count, o->host.cpus.count,
@@ -46,6 +76,7 @@ int ops_init(struct ops *o, const struct ops_env *env)
 
 void ops_free(struct ops *o)
 {
+	free(o->foreign);
 	rangeset_free(&o->preserved);
 	rangeset_free(&o->adoptable);
 	takeable_free(&o->takeable);
@@ -124,56 +155,123 @@ static int apply_adopt(struct ops *o, const struct cpulist *cpus, const struct r
 	return ret;
 }
 
-static bool owns_device(const struct ops *o, const char *id)
+static int adopt_device(struct ops *o, const char *id)
 {
-	char path[PATH_MAX];
+	void *dtbo;
+	size_t len;
+	int tx = -1, ret;
 
-	snprintf(path, sizeof(path), "%s/%s", o->env.pci_root, id);
-	return access(path, F_OK) == 0;
+	ret = dt_build_adopt_device(o->self.name, id, &dtbo, &len);
+	if (!ret) {
+		ret = mkfs_apply_overlay(&o->fs, dtbo, len, &tx);
+		free(dtbo);
+	}
+	if (ret)
+		log_err("device %s not adopted (tx %d): %s", id, tx, strerror(-ret));
+	return ret;
+}
+
+enum reset_outcome { DEVICE_RESET, DEVICE_QUIESCED, DEVICE_LIVE };
+
+/* A function the kernel cannot reset at least stops its DMA. */
+static enum reset_outcome reset_device(const char *bus, const char *id)
+{
+	int ret = pci_reset_function(bus, id);
+
+	if (!ret)
+		return DEVICE_RESET;
+	if (ret != -ENOENT)
+		log_warn("device %s not reset: %s", id, strerror(-ret));
+	ret = pci_clear_bus_master(bus, id);
+	if (!ret)
+		return DEVICE_QUIESCED;
+	log_err("device %s neither reset nor quiesced: %s", id, strerror(-ret));
+	return DEVICE_LIVE;
+}
+
+/* Side by side, as a reset takes the function 100 ms or more. */
+static void reset_devices(const char *bus, const char **ids, size_t n, size_t counts[3])
+{
+	pid_t *pids = calloc(n + 1, sizeof(*pids));
+	size_t i;
+
+	for (i = 0; i < n; i++) {
+		pid_t pid = pids ? fork() : -1;
+
+		if (!pid)
+			_exit(reset_device(bus, ids[i]));
+		if (pid < 0)
+			counts[reset_device(bus, ids[i])]++;
+		if (pids)
+			pids[i] = pid;
+	}
+	for (i = 0; pids && i < n; i++) {
+		int status;
+
+		if (pids[i] < 0)
+			continue;
+		if (waitpid(pids[i], &status, 0) == pids[i] && WIFEXITED(status) &&
+		    WEXITSTATUS(status) <= DEVICE_LIVE)
+			counts[WEXITSTATUS(status)]++;
+		else
+			counts[DEVICE_LIVE]++;
+	}
+	free(pids);
 }
 
 /*
- * Every function of the machine this kernel does not already own, but
- * bridges: an adopted function sits on a root bus of its own, so there is
- * nothing for a bridge to bridge. A device that cannot be taken leaves the
- * others and the takeover to go on. Success is one line for them all, as
- * /dev/kmsg drops a burst of more than ten.
+ * A device that cannot be taken leaves the others and the takeover to go
+ * on. With resets, the bus probes no driver while the devices join, so
+ * each driver meets its device reset rather than as the crash left it.
+ * Success is one line for them all, as /dev/kmsg drops a burst of more
+ * than ten.
  */
 int ops_adopt_devices(struct ops *o)
 {
-	int first = 0;
-	size_t i;
+	const char **adopted = calloc(o->foreign_count + 1, sizeof(*adopted));
+	size_t counts[3] = { 0 }, i;
+	bool reset = o->env.reset_devices;
+	int first = 0, ret;
 
-	for (i = 0; i < o->host.devices.count; i++) {
-		const struct pci_ids *d = &o->host.devices.devs[i];
-		void *dtbo;
-		size_t len;
-		int tx = -1, ret;
-
-		if (pci_is_bridge(d) || owns_device(o, d->id))
-			continue;
-		ret = dt_build_adopt_device(o->self.name, d->id, &dtbo, &len);
-		if (!ret) {
-			ret = mkfs_apply_overlay(&o->fs, dtbo, len, &tx);
-			free(dtbo);
-		}
-		if (ret) {
-			log_err("device %s not adopted (tx %d): %s", d->id, tx, strerror(-ret));
-			if (!first)
-				first = ret;
-			continue;
-		}
-		o->devices_adopted++;
+	if (!adopted)
+		return -ENOMEM;
+	if (reset && pci_set_autoprobe(o->env.pci_bus, false)) {
+		log_err("cannot hold off drivers on %s; adopting devices without reset",
+			o->env.pci_bus);
+		reset = false;
 	}
-	log_info("adopted %zu devices", o->devices_adopted);
+	for (i = 0; i < o->foreign_count; i++) {
+		ret = adopt_device(o, o->foreign[i]);
+		if (ret && !first)
+			first = ret;
+		if (!ret)
+			adopted[o->devices_adopted++] = o->foreign[i];
+	}
+	if (!reset) {
+		log_info("adopted %zu devices", o->devices_adopted);
+		free(adopted);
+		return first;
+	}
+
+	reset_devices(o->env.pci_bus, adopted, o->devices_adopted, counts);
+	ret = pci_set_autoprobe(o->env.pci_bus, true);
+	if (ret)
+		log_err("drivers left held off on %s: %s", o->env.pci_bus, strerror(-ret));
+	for (i = 0; i < o->devices_adopted; i++) {
+		ret = pci_probe_driver(o->env.pci_bus, adopted[i]);
+		if (ret)
+			log_warn("no driver probed for %s: %s", adopted[i], strerror(-ret));
+	}
+	log_info("adopted %zu devices: %zu reset, %zu quiesced", o->devices_adopted,
+		 counts[DEVICE_RESET], counts[DEVICE_QUIESCED]);
+	free(adopted);
 	return first;
 }
 
 /*
- * Devices come first: the driver that probes one resets it, stopping
- * whatever DMA the predecessor left running before its memory is
- * hot-added. With a dump configured the memory stays unclaimed until it
- * is copied.
+ * Devices come first, so that whatever DMA the predecessor left running
+ * is stopped before its memory is hot-added. With a dump configured the
+ * memory stays unclaimed until it is copied.
  */
 int ops_adopt(struct ops *o)
 {

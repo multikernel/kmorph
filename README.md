@@ -167,6 +167,7 @@ programs read the same file; each uses the keys for its side. `kernel`,
 | `probe_timeouts` | `5` | Consecutive timeouts before the predecessor is declared dead. |
 | `fence_retries` | `3` | Retries of a fence that could not park every CPU. |
 | `dump` | | File to receive the predecessor's memory as a vmcore before it is reclaimed. A FIFO works. Unset: reclaim at once. |
+| `reset_devices` | `yes` | Reset each adopted device before its driver binds, through its `reset` file in sysfs, or clear Bus Master Enable on a function the kernel has no way to reset. `no` leaves each device as the crash left it, for its driver to probe. |
 
 The successor's probe never mistakes a slow predecessor for a dead one on
 its own evidence: a live predecessor kernel answers every probe by itself,
@@ -248,10 +249,14 @@ FENCE_FAILED, FENCED and TAKEN_OVER.
    described in the host tree at arm time that the successor does not
    already own, bridges aside, each in a transaction of its own, so one
    that cannot be taken holds up neither the others nor the takeover.
-   The successor's kernel puts each on a root bus of its own, reaches its
-   config space through the bus's ECAM window, and binds its driver,
-   which resets the device and so stops whatever DMA the predecessor
-   left running. Then the successor computes
+   The successor's kernel puts each on a root bus of its own and reaches
+   its config space through the bus's ECAM window; nothing in the kernel
+   resets it. With `reset_devices`, kmorphd holds drivers off the bus
+   while the devices join, resets them all at once through sysfs, by FLR
+   or a power state cycle, and clears Bus Master Enable on any it cannot
+   reset, so that whatever DMA the predecessor left running stops before
+   its memory is hot-added; only then are drivers probed, each meeting a
+   clean device. Then the successor computes
    what is takeable, the machine's RAM minus its own minus the kernel's
    control regions, and every CPU it does not own, and claims it in one
    transaction. Fenced CPUs are woken from the predecessor's park slot;
@@ -342,8 +347,8 @@ the panic, the takeover, and the successor's login prompt.
 
 - Exactly two kernels: one predecessor, one successor.
 - No automatic re-arming after a takeover.
-- No adopted device is reset before its driver probes it, and one the
-  successor has no driver for keeps whatever DMA it was doing.
+- The successor has no secondary bus reset for an adopted device, only
+  FLR and power state resets; a function with neither is only quiesced.
 - Memory is adopted in whole 128 MB blocks; the remainder stays unclaimed.
 - The dump is not filtered; makedumpfile can shrink it afterwards.
 - `kmorph upgrade`, a planned takeover for a zero-downtime kernel upgrade,

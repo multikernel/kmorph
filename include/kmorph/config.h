@@ -1,6 +1,7 @@
 #ifndef KMORPH_CONFIG_H
 #define KMORPH_CONFIG_H
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -28,6 +29,7 @@ struct kmorph_config {
 	/* Takeover (successor side) */
 	unsigned int fence_retries;
 	char *dump;
+	bool reset_devices;	/* reset each adopted device before its driver binds */
 
 	/* Console the successor takes over: a serial line it is armed with */
 	char *console;			/* e.g. ttyS0 */
