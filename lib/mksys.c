@@ -14,9 +14,9 @@ struct mk_boot_args {
 
 unsigned long mksys_kexec_flags(int mk_id, bool has_initrd)
 {
-	unsigned long flags = MK_KEXEC_MULTIKERNEL;
+	unsigned long flags = MK_KEXEC_FILE_MULTIKERNEL;
 
-	flags |= ((unsigned long)mk_id << MK_KEXEC_MK_ID_SHIFT) & MK_KEXEC_MK_ID_MASK;
+	flags |= ((unsigned long)mk_id << MK_KEXEC_FILE_MK_ID_SHIFT) & MK_KEXEC_FILE_MK_ID_MASK;
 	if (!has_initrd)
 		flags |= MK_KEXEC_FILE_NO_INITRAMFS;
 	return flags;

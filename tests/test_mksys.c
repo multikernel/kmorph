@@ -3,11 +3,11 @@
 
 static void kexec_flags_encode_id_and_initrd(void)
 {
-	CHECK_EQ(mksys_kexec_flags(7, true), 0x10 | (7 << 5));
-	CHECK_EQ(mksys_kexec_flags(7, false), 0x10 | (7 << 5) | 0x4);
-	CHECK_EQ(mksys_kexec_flags(2047, true), 0x10 | 0xffe0);
-	CHECK_EQ(mksys_kexec_flags(2048, true), 0x10);
-	CHECK_EQ(mksys_kexec_unload_flags(7), 0x1 | 0x10 | (7 << 5));
+	CHECK_EQ(mksys_kexec_flags(7, true), 0x80000000 | (7 << 16));
+	CHECK_EQ(mksys_kexec_flags(7, false), 0x80000000 | (7 << 16) | 0x4);
+	CHECK_EQ(mksys_kexec_flags(32767, true), 0x80000000 | 0x7fff0000);
+	CHECK_EQ(mksys_kexec_flags(32768, true), 0x80000000);
+	CHECK_EQ(mksys_kexec_unload_flags(7), 0x1 | 0x80000000 | (7 << 16));
 }
 
 static void reboot_commands_match_the_kernel(void)
