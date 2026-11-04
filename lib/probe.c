@@ -12,6 +12,7 @@ enum probe_result probe_classify(int err)
 	case ECONNRESET:
 		return PROBE_ALIVE;
 	case ETIMEDOUT:
+	case EHOSTDOWN:
 		return PROBE_SILENT;
 	default:
 		return PROBE_ERROR;

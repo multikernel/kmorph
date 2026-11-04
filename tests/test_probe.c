@@ -10,6 +10,7 @@ static void reset_and_success_mean_alive(void)
 static void timeout_means_silent(void)
 {
 	CHECK_EQ(probe_classify(ETIMEDOUT), PROBE_SILENT);
+	CHECK_EQ(probe_classify(EHOSTDOWN), PROBE_SILENT);
 }
 
 static void local_errors_are_not_evidence(void)
