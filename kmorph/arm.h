@@ -26,6 +26,7 @@ struct arm_hooks {
 	const char *class_root;		/* /sys/class, to resolve device names */
 	const char *usb_root;		/* /sys/bus/usb/devices, for usbN names */
 	const char *dmar_path;		/* ACPI DMAR, for the VT-d units */
+	const char *own_host_tree;	/* the host tree this kernel booted with, if a spawn */
 };
 
 extern const struct arm_hooks arm_default_hooks;

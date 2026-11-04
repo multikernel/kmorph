@@ -39,6 +39,7 @@ const struct arm_hooks arm_default_hooks = {
 	.class_root = DEVNAME_CLASS_ROOT,
 	.usb_root = DEVNAME_USB_ROOT,
 	.dmar_path = DMAR_PATH,
+	.own_host_tree = HOST_TREE_DIR,
 };
 
 static bool strlist_has(const struct strlist *l, const char *s)
@@ -241,6 +242,31 @@ static void read_crash_layout(const struct arm_hooks *h, struct vmcore_info *vi)
 }
 
 /*
+ * A kernel that took over booted without ACPI, from a host tree; the
+ * machine is still the one that tree describes, so the firmware's tables
+ * it names are passed on as they came.
+ */
+static void inherit_from_own_host_tree(const struct arm_hooks *h, struct host_tree *ht,
+				       bool cpus, bool dmar)
+{
+	struct host_tree own;
+
+	if (!h->own_host_tree || host_tree_read(h->own_host_tree, &own))
+		return;
+	log_info("no ACPI tables; machine %s from %s",
+		 cpus && dmar ? "CPUs and IOMMUs" : cpus ? "CPUs" : "IOMMUs", h->own_host_tree);
+	if (cpus) {
+		ht->cpus = own.cpus;
+		own.cpus = (struct cpulist){ NULL, 0 };
+	}
+	if (dmar) {
+		ht->dmar = own.dmar;
+		own.dmar = (struct dmar_info)DMAR_INFO_INIT;
+	}
+	host_tree_free(&own);
+}
+
+/*
  * The host tree the successor boots with: every CPU on the machine (from
  * the config, else the firmware's MADT), the machine's RAM, and its PCI
  * devices. The successor can only fence and adopt what is named here.
@@ -248,17 +274,22 @@ static void read_crash_layout(const struct arm_hooks *h, struct vmcore_info *vi)
 static int build_host_tree(const struct kmorph_config *cfg, const struct arm_hooks *h,
 			   struct host_tree *ht)
 {
+	bool no_madt = false;
 	int ret = 0, dmar_ret;
 
 	memset(ht, 0, sizeof(*ht));
-	if (cfg->machine_cpus.count)
+	if (cfg->machine_cpus.count) {
 		ht->cpus = cfg->machine_cpus;
-	else
+	} else {
 		ret = madt_read_cpus(h->madt_path, &ht->cpus);
+		no_madt = ret == -ENOENT;
+	}
 	dmar_ret = dmar_read(h->dmar_path, &ht->dmar);
 	if (dmar_ret && dmar_ret != -ENOENT)
 		log_warn("unreadable %s (%s); host tree lists no IOMMUs", h->dmar_path,
 			 strerror(-dmar_ret));
+	if (no_madt || dmar_ret == -ENOENT)
+		inherit_from_own_host_tree(h, ht, no_madt, dmar_ret == -ENOENT);
 	if (!ht->cpus.count) {
 		log_err("no machine CPU list: %s unreadable (%s) and machine_cpus unset",
 			h->madt_path, strerror(-ret));

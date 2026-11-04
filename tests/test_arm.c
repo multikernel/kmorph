@@ -16,7 +16,7 @@ static char sysfs[] = "/tmp/kmorph-test-arm-XXXXXX";
 static char pci_root[600], block_size[600], madt_path[600], iomem_path[600];
 static char vmcoreinfo_path[600], cpu_root[600], kcore_path[600];
 static char image_path[600], login_path[600], class_root[600], usb_root[600];
-static char dmar_path[600];
+static char dmar_path[600], own_host_tree[600];
 
 struct calls {
 	char seq[32];
@@ -83,6 +83,7 @@ static const struct arm_hooks hooks = {
 	.class_root = class_root,
 	.usb_root = usb_root,
 	.dmar_path = dmar_path,
+	.own_host_tree = own_host_tree,
 };
 
 static void put(const char *rel, const void *data, size_t len)
@@ -556,6 +557,55 @@ static void arm_refuses_to_proceed_without_a_host_tree(void)
 	config_free(&cfg);
 }
 
+static void put_own_host_tree(void)
+{
+	fdt64_t cpus[] = { cpu_to_fdt64(0), cpu_to_fdt64(1), cpu_to_fdt64(2) };
+	char path[700];
+
+	mkdir(own_host_tree, 0755);
+	snprintf(path, sizeof(path), "%s/cpus", own_host_tree);
+	CHECK_EQ(file_write(path, cpus, sizeof(cpus)), 0);
+	snprintf(path, sizeof(path), "%s/multikernel,acpi-dmar", own_host_tree);
+	rename(dmar_path, path);
+}
+
+static void remove_own_host_tree(void)
+{
+	char path[700];
+
+	snprintf(path, sizeof(path), "%s/cpus", own_host_tree);
+	unlink(path);
+	snprintf(path, sizeof(path), "%s/multikernel,acpi-dmar", own_host_tree);
+	unlink(path);
+	rmdir(own_host_tree);
+}
+
+/*
+ * A kernel that took over boots without ACPI, from the host tree its own
+ * host handed it; the machine is still the one that tree describes.
+ */
+static void arm_without_acpi_hands_over_its_own_host_tree(void)
+{
+	struct mkfs fs = { sysfs };
+	void *dtbo;
+	size_t size;
+	int ht, len;
+
+	setup();
+	unlink(madt_path);
+	put_dmar_unit(0xfed90000);
+	put_own_host_tree();
+	CHECK_EQ(arm_run(&cfg, &fs, &hooks), 0);
+	remove_own_host_tree();
+	dtbo = read_blob("overlays/new", &size);
+	ht = chosen_host_tree(dtbo);
+	CHECK_EQ(fdt_getprop(dtbo, ht, "cpus", &len) ? len : 0, 24);
+	CHECK_EQ(fdt_test_get_u64(dtbo, ht, "cpus", 2), 2);
+	CHECK_EQ(fdt_getprop(dtbo, ht, "multikernel,acpi-dmar", &len) ? len : 0, 64);
+	free(dtbo);
+	config_free(&cfg);
+}
+
 static void parse_console_config(void)
 {
 	char text[1024], err[64];
@@ -942,6 +992,7 @@ TEST_MAIN({
 	snprintf(class_root, sizeof(class_root), "%s/class", sysfs);
 	snprintf(usb_root, sizeof(usb_root), "%s/usb", sysfs);
 	snprintf(dmar_path, sizeof(dmar_path), "%s/DMAR", sysfs);
+	snprintf(own_host_tree, sizeof(own_host_tree), "%s/host-tree", sysfs);
 	mkdir(cpu_root, 0755);
 	CHECK_EQ(file_write(block_size, "8000000\n", 8), 0);
 	RUN(arm_creates_loads_and_execs);
@@ -955,6 +1006,7 @@ TEST_MAIN({
 	RUN(arm_without_a_dump_omits_the_vmcore_node);
 	RUN(arm_without_crash_support_omits_the_vmcore_node);
 	RUN(arm_refuses_to_proceed_without_a_host_tree);
+	RUN(arm_without_acpi_hands_over_its_own_host_tree);
 	RUN(console_config_hands_the_serial_device_to_the_successor);
 	RUN(console_config_puts_the_serial_device_in_a_new_pool);
 	RUN(console_config_refuses_a_pool_without_the_serial_device);
