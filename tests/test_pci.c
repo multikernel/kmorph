@@ -27,7 +27,17 @@ static void reads_vendor_and_device_from_sysfs(void)
 	CHECK_EQ(ids.vendor, 0x1af4);
 	CHECK_EQ(ids.device, 0x1041);
 	CHECK_EQ(ids.class, 0x020000);
+	CHECK_EQ(ids.iommu, 0);
 	CHECK(!pci_is_bridge(&ids));
+
+	snprintf(path, sizeof(path), "%s/0000:09:00.0/iommu", root);
+	mkdir(path, 0755);
+	snprintf(path, sizeof(path), "%s/0000:09:00.0/iommu/intel-iommu", root);
+	mkdir(path, 0755);
+	snprintf(path, sizeof(path), "%s/0000:09:00.0/iommu/intel-iommu/address", root);
+	CHECK_EQ(file_write(path, "fed90000\n", 9), 0);
+	CHECK_EQ(pci_read_ids(root, "0000:09:00.0", &ids), 0);
+	CHECK_EQ(ids.iommu, 0xfed90000);
 }
 
 static void lists_every_device_in_sysfs_order(void)

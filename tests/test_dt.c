@@ -209,7 +209,7 @@ static void pool_baseline_lists_devices_with_ids(void)
 {
 	uint64_t ids[] = { 12 };
 	struct cpulist cpus = { ids, 1 };
-	struct pci_ids devs[] = { { "0000:09:00.0", 0x1af4, 0x1041, 0x020000 } };
+	struct pci_ids devs[] = { { "0000:09:00.0", 0x1af4, 0x1041, 0x020000, 0 } };
 	struct pci_list devices = { devs, 1 };
 	void *dtb;
 	size_t len;

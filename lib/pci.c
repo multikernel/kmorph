@@ -37,6 +37,20 @@ static int read_hex_attr(const char *sysfs_root, const char *id, const char *att
 	return ret;
 }
 
+/* Behind no VT-d unit, the function has no such file. */
+static void read_iommu(const char *sysfs_root, const char *id, uint64_t *base)
+{
+	char path[PATH_MAX], *text, *end;
+
+	snprintf(path, sizeof(path), "%s/%s/iommu/intel-iommu/address", sysfs_root, id);
+	if (file_read_string(path, &text))
+		return;
+	*base = strtoull(text, &end, 16);
+	if (*end)
+		*base = 0;
+	free(text);
+}
+
 static int pci_dir_filter(const struct dirent *de)
 {
 	return pci_id_valid(de->d_name);
@@ -89,6 +103,8 @@ int pci_read_ids(const char *sysfs_root, const char *pci_id, struct pci_ids *out
 		ret = read_hex_attr(sysfs_root, pci_id, "device", &out->device);
 	if (!ret)
 		ret = read_hex_attr(sysfs_root, pci_id, "class", &out->class);
+	if (!ret)
+		read_iommu(sysfs_root, pci_id, &out->iommu);
 	return ret;
 }
 

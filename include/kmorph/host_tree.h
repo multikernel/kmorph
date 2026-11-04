@@ -21,7 +21,9 @@
  *       multikernel,acpi-dmar = [bytes];   the firmware's DMAR table, optional
  *       memory@X { device_type = "memory"; reg = <base size>; } ...
  *       devices { pci_dddd_bb_ss_f { device-type = "pci"; pci-id;
- *                                   vendor-id; device-id; class-code; } ... }
+ *                                   vendor-id; device-id; class-code;
+ *                                   multikernel,iommu-base = <u64>; } ... }
+ *                                   iommu-base: register base of its VT-d unit
  *       vmcore {                       optional: what a vmcore needs
  *           #address-cells = <2>; #size-cells = <2>;
  *           page-offset = <u64>;       beyond the memory itself

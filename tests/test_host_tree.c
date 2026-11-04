@@ -21,8 +21,9 @@ static void check_cells(const void *fdt, int node)
 static void emits_cpus_ram_and_devices_under_the_node(void)
 {
 	uint64_t ids[] = { 0, 1, 2, 3 };
-	struct pci_ids devs[] = { { "0000:09:00.0", 0x1af4, 0x1041, 0x020000 } };
-	struct host_tree ht = { { ids, 4 }, RANGESET_INIT, { devs, 1 }, VMCORE_INFO_INIT, DMAR_INFO_INIT };
+	struct pci_ids devs[] = { { "0000:09:00.0", 0x1af4, 0x1041, 0x020000, 0xfed90000 },
+				  { "0000:00:1f.0", 0x8086, 0x2918, 0x060100, 0 } };
+	struct host_tree ht = { { ids, 4 }, RANGESET_INIT, { devs, 2 }, VMCORE_INFO_INIT, DMAR_INFO_INIT };
 	void *fdt = fdt_test_begin(4096);
 	int node, mem, devices, dev, plen;
 
@@ -47,6 +48,9 @@ static void emits_cpus_ram_and_devices_under_the_node(void)
 	CHECK_STREQ(fdt_getprop(fdt, dev, "pci-id", NULL), "0000:09:00.0");
 	CHECK_EQ(fdt32_to_cpu(*(const fdt32_t *)fdt_getprop(fdt, dev, "vendor-id", &plen)), 0x1af4);
 	CHECK_EQ(fdt32_to_cpu(*(const fdt32_t *)fdt_getprop(fdt, dev, "class-code", &plen)), 0x020000);
+	CHECK_EQ(fdt_test_get_u64(fdt, dev, "multikernel,iommu-base", 0), 0xfed90000);
+	dev = fdt_next_subnode(fdt, dev);
+	CHECK(!fdt_getprop(fdt, dev, "multikernel,iommu-base", NULL));
 	free(fdt);
 	rangeset_free(&ht.ram);
 }

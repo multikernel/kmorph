@@ -14,6 +14,7 @@ struct pci_ids {
 	uint32_t vendor;
 	uint32_t device;
 	uint32_t class;		/* base class, subclass, prog-if */
+	uint64_t iommu;		/* register base of its VT-d unit, 0 for none */
 };
 
 struct pci_list {

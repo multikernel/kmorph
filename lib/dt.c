@@ -249,7 +249,7 @@ static int emit_platform_device_nodes(void *fdt, const struct strlist *names)
 	return 0;
 }
 
-static int emit_pci_device_nodes(void *fdt, const struct pci_list *devices, bool with_class)
+static int emit_pci_device_nodes(void *fdt, const struct pci_list *devices, bool host_tree)
 {
 	size_t i;
 
@@ -266,8 +266,10 @@ static int emit_pci_device_nodes(void *fdt, const struct pci_list *devices, bool
 		TRY(fdt_property_string(fdt, "pci-id", d->id));
 		TRY(fdt_property_u32(fdt, "vendor-id", d->vendor));
 		TRY(fdt_property_u32(fdt, "device-id", d->device));
-		if (with_class)
+		if (host_tree)
 			TRY(fdt_property_u32(fdt, "class-code", d->class));
+		if (host_tree && d->iommu)
+			TRY(fdt_property_u64(fdt, "multikernel,iommu-base", d->iommu));
 		TRY(fdt_end_node(fdt));
 	}
 	return 0;
