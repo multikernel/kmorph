@@ -13,9 +13,17 @@
 
 #define TRY(expr) do { int _r = (expr); if (_r) return _r; } while (0)
 
+/* Every reg below is a 64-bit address and size */
+static int emit_cells(void *fdt)
+{
+	TRY(fdt_property_u32(fdt, "#address-cells", 2));
+	return fdt_property_u32(fdt, "#size-cells", 2);
+}
+
 static int emit_vmcore(void *fdt, const struct vmcore_info *vi)
 {
 	TRY(fdt_begin_node(fdt, "vmcore"));
+	TRY(emit_cells(fdt));
 	if (vi->has_page_offset)
 		TRY(fdt_property_u64(fdt, "page-offset", vi->page_offset));
 	if (vi->vmcoreinfo.size) {
@@ -37,7 +45,10 @@ int host_tree_emit(void *fdt, const struct host_tree *ht)
 
 	if (!ht->cpus.count || !ht->ram.count)
 		return -EINVAL;
+	TRY(emit_cells(fdt));
 	TRY(fdtutil_prop_cpulist(fdt, "cpus", &ht->cpus));
+	if (ht->dmar.len)
+		TRY(fdt_property(fdt, DMAR_PROP, ht->dmar.table, ht->dmar.len));
 	for (i = 0; i < ht->ram.count; i++) {
 		char node[32];
 
@@ -262,4 +273,5 @@ void host_tree_free(struct host_tree *ht)
 	rangeset_free(&ht->ram);
 	pci_list_free(&ht->devices);
 	vmcore_info_free(&ht->vmcore);
+	dmar_info_free(&ht->dmar);
 }

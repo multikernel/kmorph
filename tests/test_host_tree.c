@@ -11,11 +11,18 @@
 
 static char dir[] = "/tmp/kmorph-test-host-tree-XXXXXX";
 
+/* Its reg values are 64-bit addresses and sizes, as dtc expects them declared */
+static void check_cells(const void *fdt, int node)
+{
+	CHECK_EQ(fdt32_to_cpu(*(const fdt32_t *)fdt_getprop(fdt, node, "#address-cells", NULL)), 2);
+	CHECK_EQ(fdt32_to_cpu(*(const fdt32_t *)fdt_getprop(fdt, node, "#size-cells", NULL)), 2);
+}
+
 static void emits_cpus_ram_and_devices_under_the_node(void)
 {
 	uint64_t ids[] = { 0, 1, 2, 3 };
 	struct pci_ids devs[] = { { "0000:09:00.0", 0x1af4, 0x1041, 0x020000 } };
-	struct host_tree ht = { { ids, 4 }, RANGESET_INIT, { devs, 1 }, VMCORE_INFO_INIT };
+	struct host_tree ht = { { ids, 4 }, RANGESET_INIT, { devs, 1 }, VMCORE_INFO_INIT, DMAR_INFO_INIT };
 	void *fdt = fdt_test_begin(4096);
 	int node, mem, devices, dev, plen;
 
@@ -28,6 +35,7 @@ static void emits_cpus_ram_and_devices_under_the_node(void)
 
 	node = fdt_path_offset(fdt, "/" HOST_TREE_NODE);
 	CHECK(node >= 0);
+	check_cells(fdt, node);
 	CHECK_EQ(fdt_test_get_u64(fdt, node, "cpus", 3), 3);
 	mem = fdt_subnode_offset(fdt, node, "memory@100000");
 	CHECK(mem >= 0);
@@ -43,11 +51,38 @@ static void emits_cpus_ram_and_devices_under_the_node(void)
 	rangeset_free(&ht.ram);
 }
 
+static void emits_the_dmar_table(void)
+{
+	uint64_t ids[] = { 0 };
+	struct host_tree ht = { { ids, 1 }, RANGESET_INIT, { NULL, 0 }, VMCORE_INFO_INIT, DMAR_INFO_INIT };
+	void *fdt = fdt_test_begin(2048);
+	int node;
+
+	rangeset_add(&ht.ram, 0x1000, 0x1000);
+	static const char table[] = "DMAR-bytes";
+	const void *prop;
+	int len;
+
+	ht.dmar.table = (void *)table;
+	ht.dmar.len = sizeof(table);
+	fdt_begin_node(fdt, HOST_TREE_NODE);
+	CHECK_EQ(host_tree_emit(fdt, &ht), 0);
+	fdt_end_node(fdt);
+	fdt_test_finish(fdt);
+
+	node = fdt_path_offset(fdt, "/" HOST_TREE_NODE);
+	prop = fdt_getprop(fdt, node, "multikernel,acpi-dmar", &len);
+	CHECK_EQ(len, (int)sizeof(table));
+	CHECK(!memcmp(prop, table, sizeof(table)));
+	free(fdt);
+	rangeset_free(&ht.ram);
+}
+
 static void emit_needs_cpus_and_ram(void)
 {
 	uint64_t ids[] = { 0 };
-	struct host_tree ht = { { ids, 1 }, RANGESET_INIT, { NULL, 0 }, VMCORE_INFO_INIT };
-	struct host_tree nocpus = { { NULL, 0 }, RANGESET_INIT, { NULL, 0 }, VMCORE_INFO_INIT };
+	struct host_tree ht = { { ids, 1 }, RANGESET_INIT, { NULL, 0 }, VMCORE_INFO_INIT, DMAR_INFO_INIT };
+	struct host_tree nocpus = { { NULL, 0 }, RANGESET_INIT, { NULL, 0 }, VMCORE_INFO_INIT, DMAR_INFO_INIT };
 	void *fdt = fdt_test_begin(1024);
 
 	CHECK(host_tree_emit(fdt, &ht) < 0);
@@ -132,7 +167,7 @@ static void missing_directory_is_enoent(void)
 static void emits_the_vmcore_node_when_present(void)
 {
 	uint64_t ids[] = { 0, 1 };
-	struct host_tree ht = { { ids, 2 }, RANGESET_INIT, { NULL, 0 }, VMCORE_INFO_INIT };
+	struct host_tree ht = { { ids, 2 }, RANGESET_INIT, { NULL, 0 }, VMCORE_INFO_INIT, DMAR_INFO_INIT };
 	void *fdt = fdt_test_begin(4096);
 	int node, vm, sub, len;
 	const fdt64_t *cells;
@@ -154,6 +189,7 @@ static void emits_the_vmcore_node_when_present(void)
 	node = fdt_path_offset(fdt, "/" HOST_TREE_NODE);
 	vm = fdt_subnode_offset(fdt, node, "vmcore");
 	CHECK(vm >= 0);
+	check_cells(fdt, vm);
 	CHECK_EQ(fdt_test_get_u64(fdt, vm, "page-offset", 0), 0xffff888000000000ULL);
 	sub = fdt_subnode_offset(fdt, vm, "vmcoreinfo");
 	CHECK_EQ(fdt_test_get_u64(fdt, sub, "reg", 0), 0x7ffd1000);
@@ -171,7 +207,7 @@ static void emits_the_vmcore_node_when_present(void)
 static void omits_the_vmcore_node_when_absent(void)
 {
 	uint64_t ids[] = { 0 };
-	struct host_tree ht = { { ids, 1 }, RANGESET_INIT, { NULL, 0 }, VMCORE_INFO_INIT };
+	struct host_tree ht = { { ids, 1 }, RANGESET_INIT, { NULL, 0 }, VMCORE_INFO_INIT, DMAR_INFO_INIT };
 	void *fdt = fdt_test_begin(1024);
 	int node;
 
@@ -236,6 +272,7 @@ TEST_MAIN({
 		return 1;
 	}
 	RUN(emits_cpus_ram_and_devices_under_the_node);
+	RUN(emits_the_dmar_table);
 	RUN(emit_needs_cpus_and_ram);
 	RUN(reads_cpus_ram_and_devices_back_from_a_directory);
 	RUN(emits_the_vmcore_node_when_present);

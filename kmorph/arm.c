@@ -9,6 +9,7 @@
 #include "kmorph/cpio.h"
 #include "kmorph/crashinfo.h"
 #include "kmorph/devname.h"
+#include "kmorph/dmar.h"
 #include "kmorph/dt.h"
 #include "kmorph/log.h"
 #include "kmorph/mksys.h"
@@ -37,6 +38,7 @@ const struct arm_hooks arm_default_hooks = {
 	.default_initrd = KMORPH_INITRD_PATH,
 	.class_root = DEVNAME_CLASS_ROOT,
 	.usb_root = DEVNAME_USB_ROOT,
+	.dmar_path = DMAR_PATH,
 };
 
 static bool strlist_has(const struct strlist *l, const char *s)
@@ -246,16 +248,21 @@ static void read_crash_layout(const struct arm_hooks *h, struct vmcore_info *vi)
 static int build_host_tree(const struct kmorph_config *cfg, const struct arm_hooks *h,
 			   struct host_tree *ht)
 {
-	int ret = 0;
+	int ret = 0, dmar_ret;
 
 	memset(ht, 0, sizeof(*ht));
 	if (cfg->machine_cpus.count)
 		ht->cpus = cfg->machine_cpus;
 	else
 		ret = madt_read_cpus(h->madt_path, &ht->cpus);
+	dmar_ret = dmar_read(h->dmar_path, &ht->dmar);
+	if (dmar_ret && dmar_ret != -ENOENT)
+		log_warn("unreadable %s (%s); host tree lists no IOMMUs", h->dmar_path,
+			 strerror(-dmar_ret));
 	if (!ht->cpus.count) {
 		log_err("no machine CPU list: %s unreadable (%s) and machine_cpus unset",
 			h->madt_path, strerror(-ret));
+		dmar_info_free(&ht->dmar);
 		return -ENOENT;
 	}
 
@@ -271,15 +278,16 @@ static int build_host_tree(const struct kmorph_config *cfg, const struct arm_hoo
 	if (cfg->dump)
 		read_crash_layout(h, &ht->vmcore);
 
-	log_info("host tree: %zu CPUs, %llu MB in %zu ranges, %zu PCI devices, %zu CPU notes",
+	log_info("host tree: %zu CPUs, %llu MB in %zu ranges, %zu PCI devices, %zu IOMMUs, %zu CPU notes",
 		 ht->cpus.count, (unsigned long long)rangeset_total(&ht->ram) >> 20,
-		 ht->ram.count, ht->devices.count, ht->vmcore.cpu_notes.count);
+		 ht->ram.count, ht->devices.count, ht->dmar.units.count, ht->vmcore.cpu_notes.count);
 	return 0;
 fail:
 	if (ht->cpus.ids != cfg->machine_cpus.ids)
 		cpulist_free(&ht->cpus);
 	rangeset_free(&ht->ram);
 	vmcore_info_free(&ht->vmcore);
+	dmar_info_free(&ht->dmar);
 	return ret;
 }
 

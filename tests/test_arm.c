@@ -16,6 +16,7 @@ static char sysfs[] = "/tmp/kmorph-test-arm-XXXXXX";
 static char pci_root[600], block_size[600], madt_path[600], iomem_path[600];
 static char vmcoreinfo_path[600], cpu_root[600], kcore_path[600];
 static char image_path[600], login_path[600], class_root[600], usb_root[600];
+static char dmar_path[600];
 
 struct calls {
 	char seq[32];
@@ -81,6 +82,7 @@ static const struct arm_hooks hooks = {
 	.default_initrd = image_path,
 	.class_root = class_root,
 	.usb_root = usb_root,
+	.dmar_path = dmar_path,
 };
 
 static void put(const char *rel, const void *data, size_t len)
@@ -355,6 +357,51 @@ static void arm_hands_over_a_host_tree_from_firmware_and_sysfs(void)
 	node = fdt_subnode_offset(dtbo, ht, "devices");
 	dev = fdt_first_subnode(dtbo, node);
 	CHECK_STREQ(fdt_getprop(dtbo, dev, "pci-id", NULL), "0000:09:00.0");
+	free(dtbo);
+	config_free(&cfg);
+}
+
+static void put_dmar_unit(uint64_t base)
+{
+	unsigned char t[64];
+	uint32_t len = sizeof(t);
+
+	memset(t, 0, sizeof(t));
+	memcpy(t, "DMAR", 4);
+	memcpy(t + 4, &len, 4);
+	t[48 + 2] = 16;
+	memcpy(t + 48 + 8, &base, 8);
+	CHECK_EQ(file_write(dmar_path, t, sizeof(t)), 0);
+}
+
+static void arm_hands_over_the_dmar_table(void)
+{
+	struct mkfs fs = { sysfs };
+	void *dtbo;
+	size_t size;
+	int ht, len;
+
+	setup();
+	put_dmar_unit(0xfed90000);
+	CHECK_EQ(arm_run(&cfg, &fs, &hooks), 0);
+	unlink(dmar_path);
+	dtbo = read_blob("overlays/new", &size);
+	ht = chosen_host_tree(dtbo);
+	CHECK_EQ(fdt_getprop(dtbo, ht, "multikernel,acpi-dmar", &len) ? len : 0, 64);
+	free(dtbo);
+	config_free(&cfg);
+}
+
+static void a_machine_without_a_dmar_table_hands_none_over(void)
+{
+	struct mkfs fs = { sysfs };
+	void *dtbo;
+	size_t len;
+
+	setup();
+	CHECK_EQ(arm_run(&cfg, &fs, &hooks), 0);
+	dtbo = read_blob("overlays/new", &len);
+	CHECK(!fdt_getprop(dtbo, chosen_host_tree(dtbo), "multikernel,acpi-dmar", NULL));
 	free(dtbo);
 	config_free(&cfg);
 }
@@ -894,12 +941,15 @@ TEST_MAIN({
 	snprintf(login_path, sizeof(login_path), "%s/sh", sysfs);
 	snprintf(class_root, sizeof(class_root), "%s/class", sysfs);
 	snprintf(usb_root, sizeof(usb_root), "%s/usb", sysfs);
+	snprintf(dmar_path, sizeof(dmar_path), "%s/DMAR", sysfs);
 	mkdir(cpu_root, 0755);
 	CHECK_EQ(file_write(block_size, "8000000\n", 8), 0);
 	RUN(arm_creates_loads_and_execs);
 	RUN(dump_config_relaxes_the_successors_devmem);
 	RUN(arm_passes_devices_to_the_instance);
 	RUN(arm_hands_over_a_host_tree_from_firmware_and_sysfs);
+	RUN(arm_hands_over_the_dmar_table);
+	RUN(a_machine_without_a_dmar_table_hands_none_over);
 	RUN(config_machine_cpus_override_the_madt);
 	RUN(arm_records_the_crash_layout_in_the_host_tree);
 	RUN(arm_without_a_dump_omits_the_vmcore_node);
