@@ -14,8 +14,12 @@ static const char iomem[] =
 	"7ffdc000-7fffffff : Reserved\n"
 	"80000000-8fffffff : Multikernel pool\n"
 	"  80000000-87ffffff : Instance web\n"
+	"90000000-97ffffff : System RAM (multikernel)\n"
+	"98000000-9fffffff : System RAMdisk\n"
+	"a0000000-a7ffffff : System RAM (kmem)\n"
 	"fed00000-fed003ff : HPET 0\n";
 
+/* RAM hot-added by a driver is named for it, as a kernel's adopted RAM is */
 static void collects_system_ram_only(void)
 {
 	char path[] = "/tmp/kmorph-test-iomem-XXXXXX";
@@ -27,11 +31,14 @@ static void collects_system_ram_only(void)
 	CHECK_EQ(file_write(path, iomem, sizeof(iomem) - 1), 0);
 
 	CHECK_EQ(iomem_system_ram(path, &ram), 0);
-	CHECK_EQ(ram.count, 2);
+	CHECK_EQ(ram.count, 4);
 	CHECK_EQ(ram.r[0].base, 0x1000);
 	CHECK_EQ(ram.r[0].size, 0x9ec00);
 	CHECK_EQ(ram.r[1].base, 0x100000);
 	CHECK_EQ(ram.r[1].size, 0x7ffdc000 - 0x100000);
+	CHECK_EQ(ram.r[2].base, 0x90000000);
+	CHECK_EQ(ram.r[2].size, 0x8000000);
+	CHECK_EQ(ram.r[3].base, 0xa0000000);
 
 	rangeset_free(&ram);
 	unlink(path);
