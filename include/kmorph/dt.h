@@ -35,6 +35,8 @@ int dt_build_adopt(const char *name, const struct cpulist *cpus,
 		   const struct rangeset *memory, void **dtbo, size_t *len);
 /* One function of the fenced predecessor, so that each succeeds or fails alone. */
 int dt_build_adopt_device(const char *name, const char *pci_id, void **dtbo, size_t *len);
+/* One IOMMU unit of the fenced predecessor, by its register base */
+int dt_build_iommu_add(const char *name, uint64_t base, void **dtbo, size_t *len);
 
 /* Baselines for /sys/fs/multikernel/device_tree */
 int dt_build_pool_baseline(const struct cpulist *cpus, uint64_t memory_bytes,

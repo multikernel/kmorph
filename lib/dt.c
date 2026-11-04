@@ -229,6 +229,33 @@ int dt_build_adopt_device(const char *name, const char *pci_id, void **dtbo, siz
 	return fdtutil_build(build_adopt_device, &a, dtbo, len);
 }
 
+struct iommu_add_args {
+	const char *name;
+	uint64_t base;
+};
+
+static int build_iommu_add(void *fdt, void *arg)
+{
+	const struct iommu_add_args *a = arg;
+	char target[256];
+
+	snprintf(target, sizeof(target), INSTANCES_PATH "/%s", a->name);
+	TRY(overlay_begin(fdt, target));
+	TRY(fdt_begin_node(fdt, "iommu-add"));
+	TRY(fdt_begin_node(fdt, "dmar@0"));
+	TRY(fdt_property_u64(fdt, "reg", a->base));
+	TRY(fdt_end_node(fdt));
+	TRY(fdt_end_node(fdt));
+	return overlay_end(fdt);
+}
+
+int dt_build_iommu_add(const char *name, uint64_t base, void **dtbo, size_t *len)
+{
+	struct iommu_add_args a = { name, base };
+
+	return fdtutil_build(build_iommu_add, &a, dtbo, len);
+}
+
 struct pool_args {
 	const struct cpulist *cpus;
 	uint64_t memory_bytes;

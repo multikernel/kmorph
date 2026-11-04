@@ -490,6 +490,114 @@ static void without_reset_drivers_bind_as_devices_join(void)
 	put_rel(pci, "drivers_autoprobe", "1", 1);
 }
 
+#define HOST_DMAR "chosen/multikernel,host-tree/multikernel,acpi-dmar"
+
+static void put_host_iommu(uint64_t base)
+{
+	unsigned char table[64] = "DMAR";
+
+	table[4] = sizeof(table);
+	table[48 + 2] = 16;
+	memcpy(table + 48 + 8, &base, 8);
+	put_rel(devtree, HOST_DMAR, table, sizeof(table));
+}
+
+static void check_last_iommu_add(uint64_t base)
+{
+	void *dtbo;
+	size_t len;
+	int frag, ov, op, item;
+
+	dtbo = read_blob("overlays/new", &len);
+	frag = fdt_path_offset(dtbo, "/fragment@0");
+	CHECK_STREQ(fdt_getprop(dtbo, frag, "target-path", NULL), "/instances/successor");
+	ov = fdt_subnode_offset(dtbo, frag, "__overlay__");
+	op = fdt_subnode_offset(dtbo, ov, "iommu-add");
+	CHECK(op >= 0);
+	item = fdt_subnode_offset(dtbo, op, "dmar@0");
+	CHECK_EQ(fdt_test_get_u64(dtbo, item, "reg", 0), base);
+	free(dtbo);
+}
+
+static void put_live_function(const char *id)
+{
+	uint8_t config[64] = { [4] = 0x07, [5] = 0x01 };
+	char rel[128];
+
+	snprintf(rel, sizeof(rel), "devices/%s", id);
+	mkdir_rel(pci, rel);
+	snprintf(rel, sizeof(rel), "devices/%s/config", id);
+	put_rel(pci, rel, config, sizeof(config));
+}
+
+static void remove_function(const char *id)
+{
+	char rel[128];
+
+	snprintf(rel, sizeof(rel), "devices/%s/config", id);
+	remove_rel(pci, rel);
+	snprintf(rel, sizeof(rel), "devices/%s", id);
+	remove_rel(pci, rel);
+}
+
+/*
+ * The dead host's IOMMU would translate the successor's DMA through the
+ * host's page tables, so the successor claims it once nothing the host
+ * set up can still reach memory: every function adopted and quiesced.
+ */
+static void quiesced_devices_let_the_successor_claim_the_iommu(void)
+{
+	struct ops o;
+	uint8_t *after;
+	size_t len;
+	char *text;
+
+	setup_env(NULL);
+	put_host_iommu(0xfed90000);
+	CHECK_EQ(ops_init(&o, &env), 0);
+	put_live_function("0000:04:00.0");
+	put_live_function("0000:05:00.0");
+
+	CHECK_EQ(ops_adopt_devices(&o), 0);
+	after = read_blob_at(pci, "devices/0000:04:00.0/config", &len);
+	CHECK_EQ(after[4], 0x03);
+	free(after);
+	check_last_iommu_add(0xfed90000);
+	text = read_text(pci, "drivers_autoprobe");
+	CHECK_STREQ(text, "1");
+	free(text);
+	text = read_text(pci, "drivers_probe");
+	CHECK_STREQ(text, "0000:05:00.0");
+	free(text);
+	ops_free(&o);
+
+	remove_function("0000:04:00.0");
+	remove_function("0000:05:00.0");
+	remove_rel(devtree, HOST_DMAR);
+	put_rel(pci, "drivers_probe", "", 0);
+}
+
+static void the_host_keeps_the_iommu_while_a_device_is_not_adopted(void)
+{
+	struct ops o;
+	char *text;
+
+	setup_env(NULL);
+	put_host_iommu(0xfed90000);
+	put_rel(sysfs, "overlays/tx_1/status", "failed\n", 7);
+	CHECK_EQ(ops_init(&o, &env), 0);
+	CHECK(ops_adopt_devices(&o) < 0);
+	check_last_device_add("0000:05:00.0");
+	text = read_text(pci, "drivers_autoprobe");
+	CHECK_STREQ(text, "1");
+	free(text);
+	ops_free(&o);
+
+	put_rel(sysfs, "overlays/tx_1/status", "applied\n", 8);
+	remove_rel(devtree, HOST_DMAR);
+	put_rel(pci, "drivers_probe", "", 0);
+}
+
 TEST_MAIN({
 	if (!mkdtemp(root)) {
 		perror("mkdtemp");
@@ -516,4 +624,6 @@ TEST_MAIN({
 	RUN(adopt_takes_devices_once_before_cpus_and_memory);
 	RUN(reset_devices_resets_each_before_its_driver_probes);
 	RUN(without_reset_drivers_bind_as_devices_join);
+	RUN(quiesced_devices_let_the_successor_claim_the_iommu);
+	RUN(the_host_keeps_the_iommu_while_a_device_is_not_adopted);
 })

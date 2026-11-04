@@ -205,6 +205,22 @@ static void adopt_device_adds_one_function_to_the_instance(void)
 	free(dtbo);
 }
 
+static void iommu_add_takes_over_one_unit(void)
+{
+	void *dtbo;
+	size_t len;
+	int op, item;
+
+	CHECK_EQ(dt_build_iommu_add("successor", 0xfed90000, &dtbo, &len), 0);
+	CHECK_EQ(fdtutil_check(dtbo, len), 0);
+	op = overlay_node(dtbo, "/instances/successor", "iommu-add");
+	CHECK(op >= 0);
+	item = fdt_subnode_offset(dtbo, op, "dmar@0");
+	CHECK_EQ(fdt_test_get_u64(dtbo, item, "reg", 0), 0xfed90000);
+	CHECK(fdt_subnode_offset(dtbo, op, "dmar@1") < 0);
+	free(dtbo);
+}
+
 static void pool_baseline_lists_devices_with_ids(void)
 {
 	uint64_t ids[] = { 12 };
@@ -431,6 +447,7 @@ TEST_MAIN({
 	RUN(pool_baseline_lists_platform_devices);
 	RUN(pool_device_add_targets_the_pool);
 	RUN(adopt_device_adds_one_function_to_the_instance);
+	RUN(iommu_add_takes_over_one_unit);
 	RUN(pool_baseline_requests_own_resources_by_size);
 	RUN(foreign_baseline_names_takeable_by_reg);
 	RUN(pool_view_reports_free_cpus_and_bytes);

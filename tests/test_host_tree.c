@@ -161,6 +161,28 @@ static void reads_cpus_ram_and_devices_back_from_a_directory(void)
 	host_tree_free(&ht);
 }
 
+static void reads_the_iommu_units_from_the_dmar_table(void)
+{
+	unsigned char table[64] = "DMAR";
+	uint64_t base = 0xfed90000;
+	struct host_tree ht;
+
+	table[4] = sizeof(table);
+	table[48 + 2] = 16;
+	memcpy(table + 48 + 8, &base, 8);
+	put("multikernel,acpi-dmar", table, sizeof(table));
+	CHECK_EQ(host_tree_read(dir, &ht), 0);
+	CHECK_EQ(ht.dmar.units.count, 1);
+	CHECK_EQ(ht.dmar.units.r[0].base, 0xfed90000);
+	CHECK_EQ(ht.dmar.len, sizeof(table));
+	host_tree_free(&ht);
+
+	unlink_rel("multikernel,acpi-dmar");
+	CHECK_EQ(host_tree_read(dir, &ht), 0);
+	CHECK_EQ(ht.dmar.units.count, 0);
+	host_tree_free(&ht);
+}
+
 static void missing_directory_is_enoent(void)
 {
 	struct host_tree ht;
@@ -279,6 +301,7 @@ TEST_MAIN({
 	RUN(emits_the_dmar_table);
 	RUN(emit_needs_cpus_and_ram);
 	RUN(reads_cpus_ram_and_devices_back_from_a_directory);
+	RUN(reads_the_iommu_units_from_the_dmar_table);
 	RUN(emits_the_vmcore_node_when_present);
 	RUN(omits_the_vmcore_node_when_absent);
 	RUN(reads_the_vmcore_node_back_from_a_directory);

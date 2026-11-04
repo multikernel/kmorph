@@ -261,6 +261,10 @@ int host_tree_read(const char *dir, struct host_tree *ht)
 	ret = read_vmcore(dir, &ht->vmcore);
 	if (ret)
 		goto fail;
+	snprintf(path, sizeof(path), "%s/" DMAR_PROP, dir);
+	ret = dmar_read(path, &ht->dmar);
+	if (ret && ret != -ENOENT)
+		goto fail;
 	return 0;
 fail:
 	host_tree_free(ht);

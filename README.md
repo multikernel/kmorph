@@ -256,7 +256,16 @@ FENCE_FAILED, FENCED and TAKEN_OVER.
    or a power state cycle, and clears Bus Master Enable on any it cannot
    reset, so that whatever DMA the predecessor left running stops before
    its memory is hot-added; only then are drivers probed, each meeting a
-   clean device. Then the successor computes
+   clean device. On a machine whose VT-d units still translate DMA
+   through the dead host's page tables, kmorphd holds drivers off and
+   clears Bus Master Enable even without `reset_devices`, and once every
+   function is taken and quiet it claims each unit the host tree's `dmar`
+   table names, with one `iommu-add` overlay per unit on its own
+   instance: the successor's kernel switches the unit to tables of its
+   own, with identity entries for its devices, and to the interrupt
+   remapping table it already kept in step with the host's. A function
+   left untaken or live keeps the unit the dead host's. Then the
+   successor computes
    what is takeable, the machine's RAM minus its own minus the kernel's
    control regions, and every CPU it does not own, and claims it in one
    transaction. Fenced CPUs are woken from the predecessor's park slot;

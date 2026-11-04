@@ -174,9 +174,9 @@ static int adopt_device(struct ops *o, const char *id)
 enum reset_outcome { DEVICE_RESET, DEVICE_QUIESCED, DEVICE_LIVE };
 
 /* A function the kernel cannot reset at least stops its DMA. */
-static enum reset_outcome reset_device(const char *bus, const char *id)
+static enum reset_outcome reset_device(const char *bus, const char *id, bool reset)
 {
-	int ret = pci_reset_function(bus, id);
+	int ret = reset ? pci_reset_function(bus, id) : -ENOENT;
 
 	if (!ret)
 		return DEVICE_RESET;
@@ -190,7 +190,8 @@ static enum reset_outcome reset_device(const char *bus, const char *id)
 }
 
 /* Side by side, as a reset takes the function 100 ms or more. */
-static void reset_devices(const char *bus, const char **ids, size_t n, size_t counts[3])
+static void reset_devices(const char *bus, const char **ids, size_t n, bool reset,
+			  size_t counts[3])
 {
 	pid_t *pids = calloc(n + 1, sizeof(*pids));
 	size_t i;
@@ -199,9 +200,9 @@ static void reset_devices(const char *bus, const char **ids, size_t n, size_t co
 		pid_t pid = pids ? fork() : -1;
 
 		if (!pid)
-			_exit(reset_device(bus, ids[i]));
+			_exit(reset_device(bus, ids[i], reset));
 		if (pid < 0)
-			counts[reset_device(bus, ids[i])]++;
+			counts[reset_device(bus, ids[i], reset)]++;
 		if (pids)
 			pids[i] = pid;
 	}
@@ -220,25 +221,65 @@ static void reset_devices(const char *bus, const char **ids, size_t n, size_t co
 }
 
 /*
+ * The dead host's IOMMU units would translate the successor's DMA through
+ * the host's page tables. A unit is claimed only once no function it may
+ * still guard runs DMA the host set up, as the successor's tables would
+ * let such a function write anywhere.
+ */
+static int claim_iommu(struct ops *o, uint64_t base)
+{
+	void *dtbo;
+	size_t len;
+	int ret, tx;
+
+	ret = dt_build_iommu_add(o->self.name, base, &dtbo, &len);
+	if (ret)
+		return ret;
+	ret = mkfs_apply_overlay(&o->fs, dtbo, len, &tx);
+	free(dtbo);
+	if (ret)
+		log_err("IOMMU %#llx not claimed (tx %d): %s", (unsigned long long)base,
+			tx, strerror(-ret));
+	return ret;
+}
+
+static void claim_iommus(struct ops *o, bool all_quiet)
+{
+	const struct rangelist *units = &o->host.dmar.units;
+	size_t i, claimed = 0;
+
+	if (!all_quiet) {
+		log_err("devices left untaken or live; %zu IOMMUs stay the dead host's",
+			units->count);
+		return;
+	}
+	for (i = 0; i < units->count; i++)
+		if (!claim_iommu(o, units->r[i].base))
+			claimed++;
+	log_info("claimed %zu of %zu IOMMUs", claimed, units->count);
+}
+
+/*
  * A device that cannot be taken leaves the others and the takeover to go
- * on. With resets, the bus probes no driver while the devices join, so
- * each driver meets its device reset rather than as the crash left it.
- * Success is one line for them all, as /dev/kmsg drops a burst of more
- * than ten.
+ * on. The bus probes no driver while the devices join, so each driver
+ * meets its device reset or quiesced rather than as the crash left it,
+ * and behind IOMMUs the successor drives. Success is one line for them
+ * all, as /dev/kmsg drops a burst of more than ten.
  */
 int ops_adopt_devices(struct ops *o)
 {
 	const char **adopted = calloc(o->foreign_count + 1, sizeof(*adopted));
-	size_t counts[3] = { 0 }, i;
-	bool reset = o->env.reset_devices;
+	size_t iommus = o->host.dmar.units.count, counts[3] = { 0 }, i;
+	bool hold;
 	int first = 0, ret;
 
 	if (!adopted)
 		return -ENOMEM;
-	if (reset && pci_set_autoprobe(o->env.pci_bus, false)) {
-		log_err("cannot hold off drivers on %s; adopting devices without reset",
+	hold = o->env.reset_devices || iommus;
+	if (hold && pci_set_autoprobe(o->env.pci_bus, false)) {
+		log_err("cannot hold off drivers on %s; adopting devices as they are",
 			o->env.pci_bus);
-		reset = false;
+		hold = false;
 	}
 	for (i = 0; i < o->foreign_count; i++) {
 		ret = adopt_device(o, o->foreign[i]);
@@ -247,13 +288,16 @@ int ops_adopt_devices(struct ops *o)
 		if (!ret)
 			adopted[o->devices_adopted++] = o->foreign[i];
 	}
-	if (!reset) {
+	if (!hold) {
 		log_info("adopted %zu devices", o->devices_adopted);
-		free(adopted);
-		return first;
+		if (iommus)
+			claim_iommus(o, false);
+		goto out;
 	}
 
-	reset_devices(o->env.pci_bus, adopted, o->devices_adopted, counts);
+	reset_devices(o->env.pci_bus, adopted, o->devices_adopted, o->env.reset_devices, counts);
+	if (iommus)
+		claim_iommus(o, !first && !counts[DEVICE_LIVE]);
 	ret = pci_set_autoprobe(o->env.pci_bus, true);
 	if (ret)
 		log_err("drivers left held off on %s: %s", o->env.pci_bus, strerror(-ret));
@@ -264,6 +308,7 @@ int ops_adopt_devices(struct ops *o)
 	}
 	log_info("adopted %zu devices: %zu reset, %zu quiesced", o->devices_adopted,
 		 counts[DEVICE_RESET], counts[DEVICE_QUIESCED]);
+out:
 	free(adopted);
 	return first;
 }
