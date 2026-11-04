@@ -74,6 +74,7 @@ static void supervise(const char *tty, unsigned int baud, const char *login)
 
 	sigemptyset(&mask);
 	sigprocmask(SIG_SETMASK, &mask, NULL);
+	signal(SIGPIPE, SIG_DFL);
 	for (;;) {
 		pid_t pid = fork();
 		int status;

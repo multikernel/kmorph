@@ -300,6 +300,8 @@ static int daemon_setup(struct daemon *d)
 	d->last_result = PROBE_ERROR;
 	d->probe_fd = -1;
 
+	/* A dump reader that goes away fails the dump, not the takeover */
+	signal(SIGPIPE, SIG_IGN);
 	d->epfd = epoll_create1(EPOLL_CLOEXEC);
 	d->timer_fd = open_timer(d->cfg.probe_interval_ms);
 	d->signal_fd = open_signals(d->init);
