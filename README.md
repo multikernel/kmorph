@@ -123,10 +123,11 @@ console = ttyS0
 console_login = /bin/sh
 ```
 
-and enables the service:
+and enables the services, the second to keep the successor's copy of
+the [network identity](#network-identity) current:
 
 ```
-systemctl enable --now kmorph
+systemctl enable --now kmorph kmorph-watch
 ```
 
 `memory` must hold an unpacked distro initramfs; `kmorph arm` warns when
@@ -188,22 +189,32 @@ of them changes, and `kmorph arm` warns about a stale image.
 
 The machine is reachable again only once the adopted NICs have their
 addresses back, and waiting for the disk's network manager to start,
-and for DHCP, takes seconds. `kmorph arm` therefore records the name,
-MAC, MTU, addresses and routes of every PCI network interface it does
-not hand to the successor, and forwards them beside the config. Right
-after adopting the devices, before it even adopts the memory, kmorphd
-puts them back on the same PCI functions over rtnetlink, without
-duplicate address detection: the addresses were the machine's a moment
-ago. The MAC does not change, so neighbours need no gratuitous ARP.
+and for DHCP, takes seconds. kmorph therefore records the name, MAC,
+MTU, addresses with their remaining lease lifetimes, and routes of every
+PCI network interface it does not hand to the successor. Right after
+adopting the devices, before it even adopts the memory, kmorphd puts
+them back on the same PCI functions over rtnetlink, without duplicate
+address detection: the addresses were the machine's a moment ago. The
+MAC does not change, so neighbours need no gratuitous ARP. A lease that
+ran out in between is not restored.
 
-The record is taken at arm time; an address the predecessor gains
-later is not in it, and comes back only with the network manager.
-NetworkManager finds the interfaces configured and leaves them be as
-external ones, which also means it renews no DHCP lease on them, so
-`kmorph-network.service` hands the interfaces kmorphd restored, listed
-in `/run/kmorph/network-restored`, back to it with `nmcli device
-connect`, which keeps their addresses. Enable it on a NetworkManager
-host. A physical NIC still renegotiates its link after the reset that
+A crash leaves no time to send the record, so it has to be in the
+successor beforehand and current. `kmorph arm` forwards it beside the
+config, and `kmorph-watch.service` (`kmorph watch`) listens to rtnetlink
+on the predecessor and sends it again to kmorphd whenever an interface,
+address or route changes, a DHCP renewal included. `kmorph upgrade`
+sends it once more right before the handover.
+
+The network manager on the disk then starts with the interfaces
+already configured, and has to configure them as on any boot to take
+their leases over; a DHCP server hands the same client the same address,
+so the address never goes away. systemd-networkd does that by default.
+NetworkManager instead leaves configured interfaces alone as external
+ones and renews no lease on them; `kmorph-nm-handback.service`, enabled
+on a NetworkManager host, runs before it only when kmorphd restored
+interfaces (`/run/kmorph/network-restored`) and gives it a runtime
+drop-in with `keep-configuration=no` for just those interfaces. A
+physical NIC still renegotiates its link after the reset that
 `reset_devices` gives it, which can take a second or more.
 
 ## Configuration
