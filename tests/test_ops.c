@@ -490,16 +490,23 @@ static void without_reset_drivers_bind_as_devices_join(void)
 	put_rel(pci, "drivers_autoprobe", "1", 1);
 }
 
-#define HOST_DMAR "chosen/multikernel,host-tree/multikernel,acpi-dmar"
+#define HOST_IOMMUS "chosen/multikernel,iommus"
+#define HOST_IOMMU HOST_IOMMUS "/iommu@fed90000"
 
 static void put_host_iommu(uint64_t base)
 {
-	unsigned char table[64] = "DMAR";
+	fdt64_t reg[2] = { cpu_to_fdt64(base), cpu_to_fdt64(0x1000) };
 
-	table[4] = sizeof(table);
-	table[48 + 2] = 16;
-	memcpy(table + 48 + 8, &base, 8);
-	put_rel(devtree, HOST_DMAR, table, sizeof(table));
+	mkdir_rel(devtree, HOST_IOMMUS);
+	mkdir_rel(devtree, HOST_IOMMU);
+	put_rel(devtree, HOST_IOMMU "/reg", reg, sizeof(reg));
+}
+
+static void remove_host_iommu(void)
+{
+	remove_rel(devtree, HOST_IOMMU "/reg");
+	remove_rel(devtree, HOST_IOMMU);
+	remove_rel(devtree, HOST_IOMMUS);
 }
 
 static void check_last_iommu_add(uint64_t base)
@@ -573,7 +580,7 @@ static void quiesced_devices_let_the_successor_claim_the_iommu(void)
 
 	remove_function("0000:04:00.0");
 	remove_function("0000:05:00.0");
-	remove_rel(devtree, HOST_DMAR);
+	remove_host_iommu();
 	put_rel(pci, "drivers_probe", "", 0);
 }
 
@@ -594,7 +601,7 @@ static void the_host_keeps_the_iommu_while_a_device_is_not_adopted(void)
 	ops_free(&o);
 
 	put_rel(sysfs, "overlays/tx_1/status", "applied\n", 8);
-	remove_rel(devtree, HOST_DMAR);
+	remove_host_iommu();
 	put_rel(pci, "drivers_probe", "", 0);
 }
 

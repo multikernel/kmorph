@@ -63,6 +63,8 @@ int ops_init(struct ops *o, const struct ops_env *env)
 		return ret;
 	}
 	ret = list_foreign(o);
+	if (!ret)
+		ret = devtree_read_iommus(env->devtree_root, &o->iommus);
 	if (ret) {
 		ops_free(o);
 		return ret;
@@ -77,6 +79,7 @@ int ops_init(struct ops *o, const struct ops_env *env)
 void ops_free(struct ops *o)
 {
 	free(o->foreign);
+	rangelist_free(&o->iommus);
 	rangeset_free(&o->preserved);
 	rangeset_free(&o->adoptable);
 	takeable_free(&o->takeable);
@@ -245,7 +248,7 @@ static int claim_iommu(struct ops *o, uint64_t base)
 
 static void claim_iommus(struct ops *o, bool all_quiet)
 {
-	const struct rangelist *units = &o->host.dmar.units;
+	const struct rangelist *units = &o->iommus;
 	size_t i, claimed = 0;
 
 	if (!all_quiet) {
@@ -269,7 +272,7 @@ static void claim_iommus(struct ops *o, bool all_quiet)
 int ops_adopt_devices(struct ops *o)
 {
 	const char **adopted = calloc(o->foreign_count + 1, sizeof(*adopted));
-	size_t iommus = o->host.dmar.units.count, counts[3] = { 0 }, i;
+	size_t iommus = o->iommus.count, counts[3] = { 0 }, i;
 	bool hold;
 	int first = 0, ret;
 

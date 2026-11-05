@@ -47,8 +47,6 @@ int host_tree_emit(void *fdt, const struct host_tree *ht)
 		return -EINVAL;
 	TRY(emit_cells(fdt));
 	TRY(fdtutil_prop_cpulist(fdt, "cpus", &ht->cpus));
-	if (ht->dmar.len)
-		TRY(fdt_property(fdt, DMAR_PROP, ht->dmar.table, ht->dmar.len));
 	for (i = 0; i < ht->ram.count; i++) {
 		char node[32];
 
@@ -261,10 +259,6 @@ int host_tree_read(const char *dir, struct host_tree *ht)
 	ret = read_vmcore(dir, &ht->vmcore);
 	if (ret)
 		goto fail;
-	snprintf(path, sizeof(path), "%s/" DMAR_PROP, dir);
-	ret = dmar_read(path, &ht->dmar);
-	if (ret && ret != -ENOENT)
-		goto fail;
 	return 0;
 fail:
 	host_tree_free(ht);
@@ -277,5 +271,4 @@ void host_tree_free(struct host_tree *ht)
 	rangeset_free(&ht->ram);
 	pci_list_free(&ht->devices);
 	vmcore_info_free(&ht->vmcore);
-	dmar_info_free(&ht->dmar);
 }

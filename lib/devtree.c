@@ -1,3 +1,4 @@
+#include <dirent.h>
 #include <errno.h>
 #include <limits.h>
 #include <stdio.h>
@@ -13,6 +14,7 @@
 
 #define HOST_TREE_REL "chosen/multikernel,host-tree"
 #define RESERVED_PROPERTY "chosen/multikernel,reserved-memory"
+#define IOMMUS_REL "chosen/multikernel,iommus"
 
 static void prop_path(char *buf, size_t len, const char *root, const char *rel)
 {
@@ -102,6 +104,38 @@ int devtree_read_self(const char *root, struct self_info *s)
 
 	if (ret)
 		self_info_free(s);
+	return ret;
+}
+
+static int iommu_node_filter(const struct dirent *d)
+{
+	return !strncmp(d->d_name, "iommu@", 6);
+}
+
+int devtree_read_iommus(const char *root, struct rangelist *out)
+{
+	char dir[PATH_MAX], path[PATH_MAX + NAME_MAX + 8];
+	struct dirent **nodes;
+	fdt64_t *reg;
+	size_t len;
+	int n, i, ret = 0;
+
+	prop_path(dir, sizeof(dir), root, IOMMUS_REL);
+	n = scandir(dir, &nodes, iommu_node_filter, alphasort);
+	if (n < 0)
+		return errno == ENOENT ? 0 : -errno;
+	for (i = 0; i < n; i++) {
+		snprintf(path, sizeof(path), "%s/%s/reg", dir, nodes[i]->d_name);
+		free(nodes[i]);
+		if (ret || (ret = file_read(path, (void **)&reg, &len)))
+			continue;
+		ret = len == 2 * sizeof(*reg) ?
+		      rangelist_add(out, fdt64_to_cpu(reg[0]), fdt64_to_cpu(reg[1])) : -EINVAL;
+		free(reg);
+	}
+	free(nodes);
+	if (ret)
+		rangelist_free(out);
 	return ret;
 }
 

@@ -9,7 +9,6 @@
 #include "kmorph/cpio.h"
 #include "kmorph/crashinfo.h"
 #include "kmorph/devname.h"
-#include "kmorph/dmar.h"
 #include "kmorph/dt.h"
 #include "kmorph/log.h"
 #include "kmorph/mksys.h"
@@ -38,7 +37,6 @@ const struct arm_hooks arm_default_hooks = {
 	.default_initrd = KMORPH_INITRD_PATH,
 	.class_root = DEVNAME_CLASS_ROOT,
 	.usb_root = DEVNAME_USB_ROOT,
-	.dmar_path = DMAR_PATH,
 	.own_host_tree = HOST_TREE_DIR,
 };
 
@@ -243,26 +241,18 @@ static void read_crash_layout(const struct arm_hooks *h, struct vmcore_info *vi)
 
 /*
  * A kernel that took over booted without ACPI, from a host tree; the
- * machine is still the one that tree describes, so the firmware's tables
- * it names are passed on as they came.
+ * machine is still the one that tree describes, so its CPUs are passed on
+ * as they came.
  */
-static void inherit_from_own_host_tree(const struct arm_hooks *h, struct host_tree *ht,
-				       bool cpus, bool dmar)
+static void inherit_cpus_from_own_host_tree(const struct arm_hooks *h, struct host_tree *ht)
 {
 	struct host_tree own;
 
 	if (!h->own_host_tree || host_tree_read(h->own_host_tree, &own))
 		return;
-	log_info("no ACPI tables; machine %s from %s",
-		 cpus && dmar ? "CPUs and IOMMUs" : cpus ? "CPUs" : "IOMMUs", h->own_host_tree);
-	if (cpus) {
-		ht->cpus = own.cpus;
-		own.cpus = (struct cpulist){ NULL, 0 };
-	}
-	if (dmar) {
-		ht->dmar = own.dmar;
-		own.dmar = (struct dmar_info)DMAR_INFO_INIT;
-	}
+	log_info("no ACPI tables; machine CPUs from %s", h->own_host_tree);
+	ht->cpus = own.cpus;
+	own.cpus = (struct cpulist){ NULL, 0 };
 	host_tree_free(&own);
 }
 
@@ -275,7 +265,7 @@ static int build_host_tree(const struct kmorph_config *cfg, const struct arm_hoo
 			   struct host_tree *ht)
 {
 	bool no_madt = false;
-	int ret = 0, dmar_ret;
+	int ret = 0;
 
 	memset(ht, 0, sizeof(*ht));
 	if (cfg->machine_cpus.count) {
@@ -284,16 +274,11 @@ static int build_host_tree(const struct kmorph_config *cfg, const struct arm_hoo
 		ret = madt_read_cpus(h->madt_path, &ht->cpus);
 		no_madt = ret == -ENOENT;
 	}
-	dmar_ret = dmar_read(h->dmar_path, &ht->dmar);
-	if (dmar_ret && dmar_ret != -ENOENT)
-		log_warn("unreadable %s (%s); host tree lists no IOMMUs", h->dmar_path,
-			 strerror(-dmar_ret));
-	if (no_madt || dmar_ret == -ENOENT)
-		inherit_from_own_host_tree(h, ht, no_madt, dmar_ret == -ENOENT);
+	if (no_madt)
+		inherit_cpus_from_own_host_tree(h, ht);
 	if (!ht->cpus.count) {
 		log_err("no machine CPU list: %s unreadable (%s) and machine_cpus unset",
 			h->madt_path, strerror(-ret));
-		dmar_info_free(&ht->dmar);
 		return -ENOENT;
 	}
 
@@ -309,16 +294,15 @@ static int build_host_tree(const struct kmorph_config *cfg, const struct arm_hoo
 	if (cfg->dump)
 		read_crash_layout(h, &ht->vmcore);
 
-	log_info("host tree: %zu CPUs, %llu MB in %zu ranges, %zu PCI devices, %zu IOMMUs, %zu CPU notes",
+	log_info("host tree: %zu CPUs, %llu MB in %zu ranges, %zu PCI devices, %zu CPU notes",
 		 ht->cpus.count, (unsigned long long)rangeset_total(&ht->ram) >> 20,
-		 ht->ram.count, ht->devices.count, ht->dmar.units.count, ht->vmcore.cpu_notes.count);
+		 ht->ram.count, ht->devices.count, ht->vmcore.cpu_notes.count);
 	return 0;
 fail:
 	if (ht->cpus.ids != cfg->machine_cpus.ids)
 		cpulist_free(&ht->cpus);
 	rangeset_free(&ht->ram);
 	vmcore_info_free(&ht->vmcore);
-	dmar_info_free(&ht->dmar);
 	return ret;
 }
 

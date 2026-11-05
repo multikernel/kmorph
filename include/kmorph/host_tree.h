@@ -2,7 +2,6 @@
 #define KMORPH_HOST_TREE_H
 
 #include "kmorph/crashinfo.h"
-#include "kmorph/dmar.h"
 #include "kmorph/parse.h"
 #include "kmorph/pci.h"
 #include "kmorph/ranges.h"
@@ -18,7 +17,6 @@
  *   multikernel,host-tree {
  *       #address-cells = <2>; #size-cells = <2>;
  *       cpus = <u64 ...>;
- *       multikernel,acpi-dmar = [bytes];   the firmware's DMAR table, optional
  *       memory@X { device_type = "memory"; reg = <base size>; } ...
  *       devices { pci_dddd_bb_ss_f { device-type = "pci"; pci-id;
  *                                   vendor-id; device-id; class-code;
@@ -34,7 +32,6 @@
  */
 
 #define HOST_TREE_NODE "multikernel,host-tree"
-#define DMAR_PROP "multikernel,acpi-dmar"
 #define HOST_TREE_DIR DEVTREE_CHOSEN "/" HOST_TREE_NODE
 #define DEVTREE_CHOSEN "/proc/device-tree/chosen"
 
@@ -43,7 +40,6 @@ struct host_tree {
 	struct rangeset ram;
 	struct pci_list devices;
 	struct vmcore_info vmcore;
-	struct dmar_info dmar;
 };
 
 /* Properties and subnodes of the node, into a node open on fdt. */

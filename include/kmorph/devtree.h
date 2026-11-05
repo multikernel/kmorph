@@ -20,6 +20,8 @@ struct self_info {
 
 bool devtree_has_host_tree(const char *root);
 int devtree_read_self(const char *root, struct self_info *s);
+/* The register sets of the host's VT-d units this kernel boots behind; none is no error. */
+int devtree_read_iommus(const char *root, struct rangelist *out);
 void self_info_free(struct self_info *s);
 
 #endif

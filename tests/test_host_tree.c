@@ -23,7 +23,7 @@ static void emits_cpus_ram_and_devices_under_the_node(void)
 	uint64_t ids[] = { 0, 1, 2, 3 };
 	struct pci_ids devs[] = { { "0000:09:00.0", 0x1af4, 0x1041, 0x020000, 0xfed90000 },
 				  { "0000:00:1f.0", 0x8086, 0x2918, 0x060100, 0 } };
-	struct host_tree ht = { { ids, 4 }, RANGESET_INIT, { devs, 2 }, VMCORE_INFO_INIT, DMAR_INFO_INIT };
+	struct host_tree ht = { { ids, 4 }, RANGESET_INIT, { devs, 2 }, VMCORE_INFO_INIT };
 	void *fdt = fdt_test_begin(4096);
 	int node, mem, devices, dev, plen;
 
@@ -55,38 +55,11 @@ static void emits_cpus_ram_and_devices_under_the_node(void)
 	rangeset_free(&ht.ram);
 }
 
-static void emits_the_dmar_table(void)
-{
-	uint64_t ids[] = { 0 };
-	struct host_tree ht = { { ids, 1 }, RANGESET_INIT, { NULL, 0 }, VMCORE_INFO_INIT, DMAR_INFO_INIT };
-	void *fdt = fdt_test_begin(2048);
-	int node;
-
-	rangeset_add(&ht.ram, 0x1000, 0x1000);
-	static const char table[] = "DMAR-bytes";
-	const void *prop;
-	int len;
-
-	ht.dmar.table = (void *)table;
-	ht.dmar.len = sizeof(table);
-	fdt_begin_node(fdt, HOST_TREE_NODE);
-	CHECK_EQ(host_tree_emit(fdt, &ht), 0);
-	fdt_end_node(fdt);
-	fdt_test_finish(fdt);
-
-	node = fdt_path_offset(fdt, "/" HOST_TREE_NODE);
-	prop = fdt_getprop(fdt, node, "multikernel,acpi-dmar", &len);
-	CHECK_EQ(len, (int)sizeof(table));
-	CHECK(!memcmp(prop, table, sizeof(table)));
-	free(fdt);
-	rangeset_free(&ht.ram);
-}
-
 static void emit_needs_cpus_and_ram(void)
 {
 	uint64_t ids[] = { 0 };
-	struct host_tree ht = { { ids, 1 }, RANGESET_INIT, { NULL, 0 }, VMCORE_INFO_INIT, DMAR_INFO_INIT };
-	struct host_tree nocpus = { { NULL, 0 }, RANGESET_INIT, { NULL, 0 }, VMCORE_INFO_INIT, DMAR_INFO_INIT };
+	struct host_tree ht = { { ids, 1 }, RANGESET_INIT, { NULL, 0 }, VMCORE_INFO_INIT };
+	struct host_tree nocpus = { { NULL, 0 }, RANGESET_INIT, { NULL, 0 }, VMCORE_INFO_INIT };
 	void *fdt = fdt_test_begin(1024);
 
 	CHECK(host_tree_emit(fdt, &ht) < 0);
@@ -161,28 +134,6 @@ static void reads_cpus_ram_and_devices_back_from_a_directory(void)
 	host_tree_free(&ht);
 }
 
-static void reads_the_iommu_units_from_the_dmar_table(void)
-{
-	unsigned char table[64] = "DMAR";
-	uint64_t base = 0xfed90000;
-	struct host_tree ht;
-
-	table[4] = sizeof(table);
-	table[48 + 2] = 16;
-	memcpy(table + 48 + 8, &base, 8);
-	put("multikernel,acpi-dmar", table, sizeof(table));
-	CHECK_EQ(host_tree_read(dir, &ht), 0);
-	CHECK_EQ(ht.dmar.units.count, 1);
-	CHECK_EQ(ht.dmar.units.r[0].base, 0xfed90000);
-	CHECK_EQ(ht.dmar.len, sizeof(table));
-	host_tree_free(&ht);
-
-	unlink_rel("multikernel,acpi-dmar");
-	CHECK_EQ(host_tree_read(dir, &ht), 0);
-	CHECK_EQ(ht.dmar.units.count, 0);
-	host_tree_free(&ht);
-}
-
 static void missing_directory_is_enoent(void)
 {
 	struct host_tree ht;
@@ -193,7 +144,7 @@ static void missing_directory_is_enoent(void)
 static void emits_the_vmcore_node_when_present(void)
 {
 	uint64_t ids[] = { 0, 1 };
-	struct host_tree ht = { { ids, 2 }, RANGESET_INIT, { NULL, 0 }, VMCORE_INFO_INIT, DMAR_INFO_INIT };
+	struct host_tree ht = { { ids, 2 }, RANGESET_INIT, { NULL, 0 }, VMCORE_INFO_INIT };
 	void *fdt = fdt_test_begin(4096);
 	int node, vm, sub, len;
 	const fdt64_t *cells;
@@ -233,7 +184,7 @@ static void emits_the_vmcore_node_when_present(void)
 static void omits_the_vmcore_node_when_absent(void)
 {
 	uint64_t ids[] = { 0 };
-	struct host_tree ht = { { ids, 1 }, RANGESET_INIT, { NULL, 0 }, VMCORE_INFO_INIT, DMAR_INFO_INIT };
+	struct host_tree ht = { { ids, 1 }, RANGESET_INIT, { NULL, 0 }, VMCORE_INFO_INIT };
 	void *fdt = fdt_test_begin(1024);
 	int node;
 
@@ -298,10 +249,8 @@ TEST_MAIN({
 		return 1;
 	}
 	RUN(emits_cpus_ram_and_devices_under_the_node);
-	RUN(emits_the_dmar_table);
 	RUN(emit_needs_cpus_and_ram);
 	RUN(reads_cpus_ram_and_devices_back_from_a_directory);
-	RUN(reads_the_iommu_units_from_the_dmar_table);
 	RUN(emits_the_vmcore_node_when_present);
 	RUN(omits_the_vmcore_node_when_absent);
 	RUN(reads_the_vmcore_node_back_from_a_directory);
