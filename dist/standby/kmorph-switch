@@ -1,0 +1,87 @@
+#!/bin/sh
+# Run by kmorphd once the successor has taken the machine over: mount
+# the machine's root, pivot every process of the standby system onto it
+# and let the disk's systemd bring up the rest of the machine. The
+# standby services keep running throughout.
+CONF=/run/kmorph/kmorph.conf
+OLD=/run/kmorph/standby
+
+# The kernel log reaches the console even while user space is half switched.
+log() { echo "kmorph-switch: $*" > /dev/kmsg; }
+die() { log "$*"; exit 1; }
+
+root= fstype= flags= mode=ro
+for word in $(cat /proc/cmdline); do
+	case "$word" in
+	root=*) root="${word#root=}" ;;
+	rootfstype=*) fstype="${word#rootfstype=}" ;;
+	rootflags=*) flags="${word#rootflags=}" ;;
+	ro) mode=ro ;;
+	rw) mode=rw ;;
+	esac
+done
+
+case "$root" in
+UUID=*) dev="/dev/disk/by-uuid/${root#UUID=}" ;;
+PARTUUID=*) dev="/dev/disk/by-partuuid/${root#PARTUUID=}" ;;
+LABEL=*) dev="/dev/disk/by-label/${root#LABEL=}" ;;
+PARTLABEL=*) dev="/dev/disk/by-partlabel/${root#PARTLABEL=}" ;;
+/dev/*) dev="$root" ;;
+*) die "no usable root= on the command line: '$root'" ;;
+esac
+
+udevadm wait --timeout=60 "$dev" || die "root device $dev did not appear"
+
+opts="$mode${flags:+,$flags}"
+mkdir -p /sysroot
+if ! mount ${fstype:+-t "$fstype"} -o "$opts" "$dev" /sysroot; then
+	command -v e2fsck >/dev/null && e2fsck -p "$dev"
+	mount ${fstype:+-t "$fstype"} -o "$opts" "$dev" /sysroot ||
+		die "cannot mount $dev"
+fi
+log "mounted $dev on /sysroot"
+
+# pivot_root refuses a shared parent mount; systemd makes everything shared.
+mount -n --make-rprivate /
+moved=
+for fs in /proc /sys /dev /run; do
+	if ! err=$(mount -n --move "$fs" "/sysroot$fs" 2>&1); then
+		for back in $moved; do
+			mount -n --move "/sysroot$back" "$back"
+		done
+		die "cannot move $fs: $err"
+	fi
+	moved="$fs $moved"
+done
+mkdir -p "/sysroot$OLD"
+cd /sysroot || die "cannot enter /sysroot"
+pivot_root . ".$OLD" || die "pivot_root failed"
+cd /
+mount -n --make-rshared /
+umount -l "$OLD"
+log "every process now runs on $dev"
+
+sysctl -q -e -w net.ipv4.ip_nonlocal_bind=0 net.ipv6.ip_nonlocal_bind=0 2>/dev/null
+systemctl daemon-reexec || die "systemd did not re-execute"
+log "systemd re-executed from $dev"
+
+# These ran against the standby root and must run again against the disk.
+systemctl restart systemd-journald.service systemd-udevd.service
+systemctl restart systemd-remount-fs.service systemd-sysctl.service \
+	systemd-tmpfiles-setup.service systemd-journal-flush.service 2>/dev/null
+
+units=$(sed -n 's/^standby[[:space:]]*=[[:space:]]*//p' "$CONF" | tr ',' ' ')
+self=$(readlink /proc/self/ns/mnt)
+for unit in $units; do
+	pid=$(systemctl show -P MainPID "$unit")
+	[ -n "$pid" ] && [ "$pid" != 0 ] || continue
+	if [ "$(readlink "/proc/$pid/ns/mnt")" != "$self" ]; then
+		log "$unit has a mount namespace of its own; restarting it"
+		systemctl restart --no-block "$unit"
+	elif [ -n "$(systemctl show -P ExecReload "$unit")" ]; then
+		systemctl reload --no-block "$unit"
+	fi
+done
+
+systemctl start --no-block default.target
+log "default.target started"

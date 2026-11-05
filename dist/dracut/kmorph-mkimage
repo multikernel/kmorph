@@ -5,19 +5,185 @@
 # initramfs is left alone, as kdump leaves it: the dracut module is
 # added only here, and the initramfs-tools hook acts only when
 # KMORPH_IMAGE is set.
+#
+# With the standby key set, the image is instead a standby root for the
+# successor to run the named services from before the takeover.
+#
+# --if-stale builds only when the image is missing or older than a file
+# it was built from.
 IMAGE=/var/lib/kmorph/successor.img
+MANIFEST="$IMAGE.files"
 CONF=/etc/kmorph/kmorph.conf
 
+conf_key() {
+	[ -f "$CONF" ] && sed -n "s/^$1[[:space:]]*=[[:space:]]*//p" "$CONF" | tail -1 | tr ',' ' '
+}
+
+if [ "$1" = "--if-stale" ]; then
+	shift
+	if [ -f "$IMAGE" ]; then
+		[ -f "$MANIFEST" ] || exit 0
+		stale=
+		while read -r f; do
+			[ "$f" -nt "$IMAGE" ] && { stale=$f; break; }
+		done < "$MANIFEST"
+		[ -n "$stale" ] || exit 0
+		echo "kmorph-mkimage: $stale changed since the image was built"
+	fi
+fi
+
 version="$1"
-if [ -z "$version" ] && [ -f "$CONF" ]; then
-	kernel=$(sed -n 's/^kernel[[:space:]]*=[[:space:]]*//p' "$CONF" | tail -1)
+if [ -z "$version" ]; then
+	kernel=$(conf_key kernel)
 	case "$kernel" in
 	*/vmlinuz-*) version="${kernel##*/vmlinuz-}" ;;
 	esac
 fi
 [ -n "$version" ] || version=$(uname -r)
 
+warn() { echo "kmorph-mkimage: $*" >&2; }
+
+# The switch mounts the root by itself: a plain partition or disk only.
+standby_root_ok() {
+	local src type
+
+	src=$(findmnt -no SOURCE /)
+	type=$(lsblk -no TYPE "$src" 2>/dev/null | head -1)
+	case "$type" in
+	part|disk) ;;
+	*) warn "the root $src is a $type device, which the standby switch cannot mount"; return 1 ;;
+	esac
+	if findmnt -no SOURCE /usr >/dev/null; then
+		warn "/usr is a separate mount, which the standby switch cannot mount"
+		return 1
+	fi
+}
+
+unit_files() {
+	systemctl cat "$1" 2>/dev/null | sed -n 's|^# \(/.*\)|\1|p'
+}
+
+exec_paths() {
+	local prop
+
+	for prop in ExecStartPre ExecStart ExecStartPost ExecReload ExecStop; do
+		systemctl show -P "$prop" "$1" | grep -o 'path=[^ ;]*' | cut -d= -f2
+	done
+}
+
+# Everything the packages of the unit and its main program ship: config,
+# data and plugins no library scan would find. Documentation is left out.
+package_files() {
+	local main
+
+	main=$(systemctl show -P ExecStart "$1" | grep -o 'path=[^ ;]*' | head -1 | cut -d= -f2)
+	{
+		if command -v rpm >/dev/null; then
+			rpm -qf --qf '%{NAME}\n' "$(systemctl show -P FragmentPath "$1")" $main 2>/dev/null |
+				grep -v ' ' | sort -u | xargs -r rpm -ql
+		elif command -v dpkg >/dev/null; then
+			dpkg -S "$(systemctl show -P FragmentPath "$1")" $main 2>/dev/null |
+				cut -d: -f1 | sort -u | xargs -r dpkg -L
+		fi
+	} | grep -v -e '^/usr/share/doc/' -e '^/usr/share/man/' -e '^/usr/share/licenses/'
+}
+
+mount_namespaced() {
+	local prop
+
+	for prop in PrivateTmp PrivateDevices ProtectHome ProtectSystem PrivateMounts; do
+		case "$(systemctl show -P "$prop" "$1")" in
+		yes|true|read-only|full|strict|tmpfs) return 0 ;;
+		esac
+	done
+	[ -n "$(systemctl show -P RootDirectory "$1")$(systemctl show -P RootImage "$1")" ]
+}
+
+build_standby() {
+	local tmp staging files unit f kopt
+
+	command -v mkfs.erofs >/dev/null || { warn "mkfs.erofs not found (erofs-utils)"; return 1; }
+	command -v dracut >/dev/null || { warn "the standby image needs dracut"; return 1; }
+	# The image's first stage has no libc.
+	KMORPHD=$(command -v kmorphd) || { warn "kmorphd not found"; return 1; }
+	if ldd "$KMORPHD" >/dev/null 2>&1; then
+		warn "$KMORPHD is not a static executable"
+		return 1
+	fi
+	export KMORPHD
+	standby_root_ok || return 1
+
+	tmp=$(mktemp -d) || return 1
+	trap 'rm -rf "$tmp"' EXIT
+	files="$tmp/files"
+	: > "$files"
+	for unit in $standby; do
+		unit_files "$unit" | grep -q . || { warn "no unit $unit"; return 1; }
+		mount_namespaced "$unit" &&
+			warn "$unit runs in a mount namespace of its own; it restarts at the takeover"
+		unit_files "$unit" >> "$files"
+		exec_paths "$unit" >> "$files"
+		package_files "$unit" >> "$files"
+	done
+	for f in $(conf_key standby_files); do
+		find "$f" \( -type f -o -type l \) >> "$files"
+	done
+	sort -u -o "$files" "$files"
+
+	# Directories under /var are recreated empty; files there are state.
+	grep -v '^/var/' "$files" | while read -r f; do
+		[ -f "$f" ] || [ -L "$f" ] && echo "$f"
+	done > "$tmp/install"
+
+	[ -d "/lib/modules/$version" ] || kopt=--no-kernel
+	dracut --force --quiet --no-compress --no-early-microcode --no-hostonly-cmdline $kopt \
+		-m "kmorph-standby" --kver "$version" \
+		--install "$(tr '\n' ' ' < "$tmp/install")" \
+		"$tmp/standby.cpio" || return 1
+
+	staging="$tmp/root"
+	mkdir "$staging"
+	(cd "$staging" && cpio -id --quiet < "$tmp/standby.cpio") || return 1
+
+	# A regular system, not an initrd, running only what standby names.
+	rm -f "$staging/etc/initrd-release" "$staging/usr/lib/initrd-release" "$staging/etc/os-release"
+	(cd /etc && find . -path ./fstab -prune -o -path './systemd/system/*.wants' -prune \
+		-o -path ./systemd/system/default.target -prune \
+		-o -print0 | cpio -0pdmu --quiet "$staging/etc") || return 1
+	cp -a /usr/lib/os-release "$staging/usr/lib/os-release" || return 1
+	: > "$staging/etc/fstab"
+	rm -f "$staging/etc/udev/hwdb.bin"
+	while read -r f; do
+		[ -d "$f" ] && [ ! -L "$f" ] && mkdir -p "$staging$f" && chown --reference="$f" "$staging$f"
+	done < "$files"
+	mkdir -p "$staging/etc/systemd/system/kmorph-standby.target.wants" \
+		"$staging/etc/systemd/system/local-fs.target.wants" "$staging/var/tmp"
+	ln -sf /usr/lib/systemd/system/kmorph-standby.target "$staging/etc/systemd/system/default.target"
+	ln -sf /dev/null "$staging/etc/systemd/system/systemd-vconsole-setup.service"
+	ln -sf /usr/lib/systemd/system/kmorph-standby-var.service \
+		"$staging/etc/systemd/system/local-fs.target.wants/"
+	for unit in kmorphd.service $standby; do
+		ln -sf "/usr/lib/systemd/system/$unit" \
+			"$staging/etc/systemd/system/kmorph-standby.target.wants/$unit"
+	done
+
+	mkdir "$tmp/initrd"
+	mkfs.erofs --quiet -zlz4hc "$tmp/initrd/standby.erofs" "$staging" || return 1
+	cp "$KMORPHD" "$tmp/initrd/init"
+	(cd "$tmp/initrd" && printf '%s\n' init standby.erofs | cpio -o -H newc --quiet) > "$IMAGE.tmp" ||
+		return 1
+	mv "$IMAGE.tmp" "$IMAGE"
+	grep -v '^/var/' "$files" > "$MANIFEST"
+	echo "kmorph-mkimage: standby image $IMAGE ($(du -h "$tmp/initrd/standby.erofs" | cut -f1) root) for: $standby"
+}
+
 mkdir -p "$(dirname "$IMAGE")"
+standby=$(conf_key standby)
+if [ -n "$standby" ]; then
+	build_standby && exit 0
+	warn "building the image without standby services"
+fi
+rm -f "$MANIFEST"
 if command -v dracut >/dev/null 2>&1; then
 	exec dracut --force --add kmorph --kver "$version" "$IMAGE"
 elif command -v mkinitramfs >/dev/null 2>&1; then

@@ -1,0 +1,8 @@
+[Unit]
+Description=Move the kmorph successor onto the machine's root
+DefaultDependencies=no
+OnFailure=emergency.target
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/kmorph/kmorph-switch

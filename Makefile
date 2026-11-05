@@ -81,6 +81,7 @@ check: $(TEST_BINS)
 	@echo "all tests passed"
 
 DRACUTDIR = $(PREFIX)/lib/dracut/modules.d/99kmorph
+STANDBYDIR = $(PREFIX)/lib/dracut/modules.d/99kmorph-standby
 LIBDIR    = $(PREFIX)/lib/kmorph
 UNITDIR   = $(PREFIX)/lib/systemd/system
 KINSTDIR  = $(PREFIX)/lib/kernel/install.d
@@ -97,6 +98,9 @@ install: all
 	$(INSTALL) -m 0644 dist/dracut/99kmorph/kmorphd-initrd.service $(DESTDIR)$(DRACUTDIR)/
 	$(INSTALL) -m 0644 dist/dracut/99kmorph/kmorph-takeover-wait.service $(DESTDIR)$(DRACUTDIR)/
 	$(INSTALL) -m 0755 dist/dracut/kmorph-mkimage $(DESTDIR)$(LIBDIR)/
+	$(INSTALL) -d $(DESTDIR)$(STANDBYDIR)
+	$(INSTALL) -m 0755 dist/dracut/99kmorph-standby/module-setup.sh dist/standby/kmorph-switch $(DESTDIR)$(STANDBYDIR)/
+	$(INSTALL) -m 0644 dist/standby/*.service dist/standby/*.target dist/standby/*.conf $(DESTDIR)$(STANDBYDIR)/
 	$(INSTALL) -m 0644 dist/systemd/kmorph.service $(DESTDIR)$(UNITDIR)/
 	$(INSTALL) -m 0755 dist/kernel-install/60-kmorph.install $(DESTDIR)$(KINSTDIR)/
 	$(INSTALL) -m 0755 dist/kernel-install/60-kmorph.install $(DESTDIR)$(POSTINSTDIR)/zz-kmorph

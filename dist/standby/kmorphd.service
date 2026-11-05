@@ -1,0 +1,9 @@
+[Unit]
+Description=kmorph successor daemon
+DefaultDependencies=no
+After=systemd-udevd.service
+
+[Service]
+ExecStart=/usr/bin/kmorphd --foreground --config /run/kmorph/kmorph.conf
+Restart=on-failure
+KillMode=process
