@@ -1,0 +1,16 @@
+# kmorphd put the adopted NICs' addresses back before NetworkManager ran,
+# which then leaves them as external and renews no DHCP lease for them.
+# Handing them back to it keeps the addresses and resumes the leases.
+[Unit]
+Description=Hand the NICs kmorph restored back to NetworkManager
+ConditionPathExists=/run/kmorph/network-restored
+ConditionPathExists=/usr/bin/nmcli
+After=NetworkManager.service
+Wants=NetworkManager.service
+
+[Service]
+Type=oneshot
+ExecStart=/bin/sh -c 'while read -r dev; do nmcli device connect "$dev"; done < /run/kmorph/network-restored'
+
+[Install]
+WantedBy=multi-user.target
