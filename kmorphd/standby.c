@@ -4,7 +4,6 @@
 #include <string.h>
 #include <sys/mount.h>
 #include <sys/stat.h>
-#include <sys/wait.h>
 #include <unistd.h>
 
 #include "kmorph/file.h"
@@ -157,23 +156,4 @@ int standby_enter(const struct standby_env *env, const char *config_path)
 unmount:
 	env->umount(STANDBY_ROOT);
 	return ret;
-}
-
-/* systemctl returns at once with --no-block, so waiting for it costs the probe loop nothing. */
-int standby_switch(void)
-{
-	pid_t pid = fork();
-	int status;
-
-	if (pid == 0) {
-		execlp("systemctl", "systemctl", "start", "--no-block", STANDBY_SWITCH_UNIT,
-		       (char *)NULL);
-		_exit(127);
-	}
-	if (pid < 0 || waitpid(pid, &status, 0) < 0)
-		return -errno;
-	if (!WIFEXITED(status) || WEXITSTATUS(status))
-		return -ECHILD;
-	log_info("standby: %s started", STANDBY_SWITCH_UNIT);
-	return 0;
 }

@@ -42,6 +42,8 @@
 
 #define STATE_DIR "/run/kmorph"
 #define STATE_PATH STATE_DIR "/state"
+/* Whatever runs next, an init's path unit or a script, waits for this file to appear. */
+#define TAKEN_OVER_PATH STATE_DIR "/taken-over"
 
 struct daemon {
 	bool init;
@@ -97,6 +99,16 @@ static void write_state_file(const struct daemon *d)
 	close(fd);
 }
 
+static void mark_taken_over(void)
+{
+	int fd = open(TAKEN_OVER_PATH, O_WRONLY | O_CREAT | O_CLOEXEC, 0644);
+
+	if (fd < 0)
+		log_err("cannot create %s: %s", TAKEN_OVER_PATH, strerror(errno));
+	else
+		close(fd);
+}
+
 static void on_state(struct takeover *t, enum takeover_state state)
 {
 	struct daemon *d = container_of(t, struct daemon, tk);
@@ -107,13 +119,7 @@ static void on_state(struct takeover *t, enum takeover_state state)
 		return;
 	if (d->cfg.console)
 		console_start(d->cfg.console, d->cfg.console_baud, d->cfg.console_login);
-	if (d->cfg.standby.count && !d->init) {
-		int ret = standby_switch();
-
-		if (ret)
-			log_err("standby: cannot start %s: %s; run it by hand",
-				STANDBY_SWITCH_UNIT, strerror(-ret));
-	}
+	mark_taken_over();
 }
 
 static void deliver_probe(struct daemon *d, int err)

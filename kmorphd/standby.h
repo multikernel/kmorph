@@ -9,7 +9,6 @@
 #define STANDBY_ROOT	"/standby"
 #define STANDBY_INIT	"/usr/lib/systemd/systemd"
 #define STANDBY_CONFIG	"/run/kmorph/kmorph.conf"
-#define STANDBY_SWITCH_UNIT "kmorph-switch.service"
 
 struct standby_env {
 	int (*mount)(const char *src, const char *target, const char *type,
@@ -30,8 +29,5 @@ extern const struct standby_env standby_default_env;
  * it had moved put back, so the caller can go on as the image's init.
  */
 int standby_enter(const struct standby_env *env, const char *config_path);
-
-/* Asks the standby system to move onto the machine's root. */
-int standby_switch(void);
 
 #endif

@@ -5,4 +5,5 @@ OnFailure=emergency.target
 
 [Service]
 Type=oneshot
+RemainAfterExit=yes
 ExecStart=/usr/lib/kmorph/kmorph-switch

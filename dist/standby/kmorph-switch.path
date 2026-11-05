@@ -1,0 +1,6 @@
+[Unit]
+Description=Wait for the kmorph takeover
+DefaultDependencies=no
+
+[Path]
+PathExists=/run/kmorph/taken-over
