@@ -1,18 +1,40 @@
 #include <errno.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 
+#include "kmorph/file.h"
 #include "kmorph/log.h"
 #include "kmorph/request.h"
 #include "client.h"
+#include "freeze.h"
 #include "upgrade.h"
 
 #define REQUEST_TIMEOUT_MS	2000
 #define FENCE_WAIT_S		10
 
+/* Filesystems frozen now need no journal replay when the successor mounts them. */
+static int freeze_filesystems(struct freeze_set *set)
+{
+	char *mountinfo;
+	int ret;
+
+	ret = file_read_string("/proc/self/mountinfo", &mountinfo);
+	if (ret)
+		return ret;
+	ret = freeze_collect(mountinfo, set);
+	free(mountinfo);
+	if (!ret)
+		ret = freeze_all(&freeze_default_ops, set);
+	if (ret)
+		freeze_set_free(set);
+	return ret;
+}
+
 int upgrade_run(const struct kmorph_config *cfg, const struct mkfs *fs)
 {
 	char other[64], reply[128], reason[96];
+	struct freeze_set frozen;
 	uint32_t id;
 	int ret;
 
@@ -32,22 +54,32 @@ int upgrade_run(const struct kmorph_config *cfg, const struct mkfs *fs)
 
 	/* What is still only in memory here would be lost with this kernel */
 	sync();
+	ret = freeze_filesystems(&frozen);
+	if (ret) {
+		log_err("upgrade: cannot freeze the filesystems: %s", strerror(-ret));
+		return ret;
+	}
+	log_info("upgrade: froze %zu filesystems", frozen.count);
 	ret = client_request(id, "handover\n", REQUEST_TIMEOUT_MS, reply, sizeof(reply));
 	if (ret) {
 		log_err("upgrade: no answer from kmorphd in %s: %s", cfg->name, strerror(-ret));
-		return ret;
+		goto thaw;
 	}
 	ret = request_parse_handover(reply, reason, sizeof(reason));
 	if (ret == -EBUSY) {
 		log_err("upgrade: successor refused: %s", reason);
-		return ret;
+		goto thaw;
 	}
 	if (ret) {
 		log_err("upgrade: kmorphd answered '%.*s'", (int)strcspn(reply, "\n"), reply);
-		return ret;
+		goto thaw;
 	}
 	log_info("upgrade: successor accepted; it fences this kernel now");
 	sleep(FENCE_WAIT_S);
 	log_err("upgrade: not fenced within %d s; this kernel stays host", FENCE_WAIT_S);
-	return -ETIMEDOUT;
+	ret = -ETIMEDOUT;
+thaw:
+	thaw_all(&freeze_default_ops, &frozen);
+	freeze_set_free(&frozen);
+	return ret;
 }
