@@ -257,7 +257,8 @@ static int collect_addr(const struct nlmsghdr *h, void *ctx)
 	flags = rtnl_attr(h, sizeof(*ifa), IFA_FLAGS);
 	if (flags && rtnl_attr_len(flags) == 4)
 		memcpy(&f, rtnl_attr_data(flags), 4);
-	if (f & IFA_F_TEMPORARY)
+	/* The same bit means secondary for IPv4 */
+	if (ifa->ifa_family == AF_INET6 && (f & IFA_F_TEMPORARY))
 		return 0;
 	local = rtnl_attr(h, sizeof(*ifa), ifa->ifa_family == AF_INET ? IFA_LOCAL : IFA_ADDRESS);
 	if (!local || rtnl_attr_len(local) != addr_len(ifa->ifa_family))
