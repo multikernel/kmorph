@@ -17,6 +17,7 @@
 
 #define FIND_TIMEOUT_MS	3000
 #define FIND_POLL_MS	10
+#define LIFE_FOREVER	0xffffffffu
 
 static bool strlist_contains(const struct strlist *l, const char *s)
 {
@@ -60,6 +61,26 @@ static int get_prefix(char *text, uint8_t *family, uint8_t *addr, uint8_t *prefi
 	return 0;
 }
 
+static const char *put_until(char *buf, size_t len, int64_t until)
+{
+	if (!until)
+		return "forever";
+	snprintf(buf, len, "%lld", (long long)until);
+	return buf;
+}
+
+static int get_until(const char *text, int64_t *until)
+{
+	char *end;
+
+	if (!strcmp(text, "forever")) {
+		*until = 0;
+		return 0;
+	}
+	*until = strtoll(text, &end, 10);
+	return *end || *until <= 0 ? -EINVAL : 0;
+}
+
 static int append(char *buf, size_t len, size_t *off, const char *fmt, ...)
 	__attribute__((format(printf, 4, 5)));
 
@@ -93,13 +114,16 @@ int netsnap_format(const struct netsnap *s, char *buf, size_t len)
 			     l->pci, l->name, m[0], m[1], m[2], m[3], m[4], m[5], l->mtu);
 		for (j = 0; j < l->naddrs && !ret; j++) {
 			const struct netsnap_addr *ad = &l->addrs[j];
+			char v[24], p[24];
 
 			ret = put_ip(a, sizeof(a), ad->family, ad->addr);
 			if (!ret && ad->has_brd)
 				ret = put_ip(b, sizeof(b), ad->family, ad->brd);
 			if (!ret)
-				ret = append(buf, len, &off, "addr %s %s/%u %s\n", l->pci, a,
-					     ad->prefix, ad->has_brd ? b : "-");
+				ret = append(buf, len, &off, "addr %s %s/%u %s %s %s\n", l->pci, a,
+					     ad->prefix, ad->has_brd ? b : "-",
+					     put_until(v, sizeof(v), ad->valid_until),
+					     put_until(p, sizeof(p), ad->preferred_until));
 		}
 		for (j = 0; j < l->nroutes && !ret; j++) {
 			const struct netsnap_route *r = &l->routes[j];
@@ -150,15 +174,17 @@ static int parse_link(struct netsnap *s, const char *pci, const char *rest)
 
 static int parse_addr(struct netsnap_link *l, const char *rest)
 {
-	char addr[64], brd[64];
+	char addr[64], brd[64], valid[24], pref[24];
 	struct netsnap_addr *a;
 	uint8_t fam;
 
-	if (l->naddrs == NETSNAP_MAX_ADDRS || sscanf(rest, "%63s %63s", addr, brd) != 2)
+	if (l->naddrs == NETSNAP_MAX_ADDRS ||
+	    sscanf(rest, "%63s %63s %23s %23s", addr, brd, valid, pref) != 4)
 		return -EINVAL;
 	a = &l->addrs[l->naddrs];
 	memset(a, 0, sizeof(*a));
-	if (get_prefix(addr, &a->family, a->addr, &a->prefix))
+	if (get_prefix(addr, &a->family, a->addr, &a->prefix) ||
+	    get_until(valid, &a->valid_until) || get_until(pref, &a->preferred_until))
 		return -EINVAL;
 	if (strcmp(brd, "-")) {
 		if (get_ip(brd, &fam, a->brd) || fam != a->family)
@@ -247,7 +273,7 @@ static int collect_addr(const struct nlmsghdr *h, void *ctx)
 {
 	const struct ifaddrmsg *ifa = rtnl_body(h);
 	struct netsnap_link *l = link_by_index(ctx, ifa->ifa_index);
-	const struct rtattr *local, *brd, *flags;
+	const struct rtattr *local, *brd, *flags, *ci;
 	struct netsnap_addr *a;
 	uint32_t f = ifa->ifa_flags;
 
@@ -274,6 +300,17 @@ static int collect_addr(const struct nlmsghdr *h, void *ctx)
 	if (brd && rtnl_attr_len(brd) == addr_len(a->family)) {
 		memcpy(a->brd, rtnl_attr_data(brd), rtnl_attr_len(brd));
 		a->has_brd = true;
+	}
+	ci = rtnl_attr(h, sizeof(*ifa), IFA_CACHEINFO);
+	if (ci && rtnl_attr_len(ci) == sizeof(struct ifa_cacheinfo)) {
+		struct ifa_cacheinfo c;
+		time_t now = time(NULL);
+
+		memcpy(&c, rtnl_attr_data(ci), sizeof(c));
+		if (c.ifa_valid != LIFE_FOREVER)
+			a->valid_until = now + c.ifa_valid;
+		if (c.ifa_prefered != LIFE_FOREVER)
+			a->preferred_until = now + c.ifa_prefered;
 	}
 	return 0;
 }
@@ -450,7 +487,12 @@ static int default_talk(void *ctx, struct rtnl_req *r)
 	return fd < 0 ? fd : rtnl_talk(fd, r);
 }
 
-const struct netsnap_env netsnap_default_env = { find_netdev, default_talk, NULL };
+static time_t wall_clock(void)
+{
+	return time(NULL);
+}
+
+const struct netsnap_env netsnap_default_env = { find_netdev, default_talk, wall_clock, NULL };
 
 /* Renaming and setting the MAC need the link down, as it still is right after the driver binds. */
 static int restore_link(const struct netsnap_env *env, const struct netsnap_link *l,
@@ -476,8 +518,21 @@ static int restore_link(const struct netsnap_env *env, const struct netsnap_link
 	return env->talk(env->ctx, &r);
 }
 
+static uint32_t life_left(int64_t until, time_t now)
+{
+	if (!until)
+		return LIFE_FOREVER;
+	return until > now ? (uint32_t)(until - now) : 0;
+}
+
+/* A lease that ran out while the machine changed kernels is not the machine's any more. */
 static int restore_addr(const struct netsnap_env *env, const struct netsnap_addr *a, int ifindex)
 {
+	time_t now = env->now();
+	struct ifa_cacheinfo ci = {
+		.ifa_valid = life_left(a->valid_until, now),
+		.ifa_prefered = life_left(a->preferred_until, now),
+	};
 	struct ifaddrmsg ifa = {
 		.ifa_family = a->family,
 		.ifa_prefixlen = a->prefix,
@@ -487,6 +542,10 @@ static int restore_addr(const struct netsnap_env *env, const struct netsnap_addr
 	uint32_t flags = IFA_F_NODAD;
 	struct rtnl_req r;
 
+	if (!ci.ifa_valid)
+		return -ETIME;
+	if (ci.ifa_prefered > ci.ifa_valid)
+		ci.ifa_prefered = ci.ifa_valid;
 	ifa.ifa_flags = flags;
 	rtnl_req_init(&r, RTM_NEWADDR, NLM_F_CREATE | NLM_F_REPLACE, &ifa, sizeof(ifa));
 	rtnl_req_attr(&r, IFA_LOCAL, a->addr, addr_len(a->family));
@@ -494,6 +553,7 @@ static int restore_addr(const struct netsnap_env *env, const struct netsnap_addr
 	if (a->has_brd)
 		rtnl_req_attr(&r, IFA_BROADCAST, a->brd, addr_len(a->family));
 	rtnl_req_attr(&r, IFA_FLAGS, &flags, sizeof(flags));
+	rtnl_req_attr(&r, IFA_CACHEINFO, &ci, sizeof(ci));
 	return env->talk(env->ctx, &r);
 }
 
@@ -569,7 +629,9 @@ int netsnap_apply(const struct netsnap_env *env, const struct netsnap *s, bool *
 		}
 		for (j = 0; j < l->naddrs; j++) {
 			ret = restore_addr(env, &l->addrs[j], ifindex);
-			if (ret)
+			if (ret == -ETIME)
+				log_info("network: %s: the lease of address %zu ran out", l->name, j);
+			else if (ret)
 				log_warn("network: %s: address %zu not restored: %s", l->name, j,
 					 strerror(-ret));
 		}

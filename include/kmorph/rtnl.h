@@ -53,6 +53,13 @@ struct ifaddrmsg {
 	uint32_t ifa_index;
 };
 
+struct ifa_cacheinfo {
+	uint32_t ifa_prefered;
+	uint32_t ifa_valid;
+	uint32_t cstamp;
+	uint32_t tstamp;
+};
+
 struct rtmsg {
 	unsigned char rtm_family;
 	unsigned char rtm_dst_len;
@@ -88,6 +95,7 @@ struct rtmsg {
 #define IFA_ADDRESS	1
 #define IFA_LOCAL	2
 #define IFA_BROADCAST	4
+#define IFA_CACHEINFO	6
 #define IFA_FLAGS	8
 #define IFA_F_TEMPORARY	0x01
 #define IFA_F_NODAD	0x02

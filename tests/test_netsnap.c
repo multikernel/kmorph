@@ -6,8 +6,8 @@
 
 static const char snapshot[] =
 	"link 0000:01:00.0 enp1s0 52:54:00:12:34:56 1500\n"
-	"addr 0000:01:00.0 192.168.122.59/24 192.168.122.255\n"
-	"addr 0000:01:00.0 fd00::59/64 -\n"
+	"addr 0000:01:00.0 192.168.122.59/24 192.168.122.255 1000003600 1000001800\n"
+	"addr 0000:01:00.0 fd00::59/64 - forever forever\n"
 	"route 0000:01:00.0 0.0.0.0/0 192.168.122.1 100 16 0\n"
 	"route 0000:01:00.0 10.1.0.0/16 - 0 4 253\n"
 	"link 0000:02:00.0 enp2s0 52:54:00:ab:cd:ef 9000\n";
@@ -24,6 +24,8 @@ static void a_snapshot_survives_formatting(void)
 	CHECK_EQ(s.links[0].naddrs, 2);
 	CHECK_EQ(s.links[0].addrs[1].family, AF_INET6);
 	CHECK(!s.links[0].addrs[1].has_brd);
+	CHECK_EQ(s.links[0].addrs[0].valid_until, 1000003600);
+	CHECK_EQ(s.links[0].addrs[1].preferred_until, 0);
 	CHECK_EQ(s.links[0].nroutes, 2);
 	CHECK(s.links[0].routes[0].has_gw);
 	CHECK_EQ(s.links[0].routes[0].metric, 100);
@@ -37,10 +39,14 @@ static void malformed_lines_are_refused(void)
 {
 	static struct netsnap s;
 
-	CHECK(netsnap_parse("addr 0000:01:00.0 10.0.0.1/24 -\n", &s) < 0);
+	CHECK(netsnap_parse("addr 0000:01:00.0 10.0.0.1/24 - forever forever\n", &s) < 0);
+	CHECK(netsnap_parse("link 0000:01:00.0 eth0 52:54:00:12:34:56 1500\n"
+			    "addr 0000:01:00.0 10.0.0.1/24 -\n", &s) < 0);
+	CHECK(netsnap_parse("link 0000:01:00.0 eth0 52:54:00:12:34:56 1500\n"
+			    "addr 0000:01:00.0 10.0.0.1/24 - soon forever\n", &s) < 0);
 	CHECK(netsnap_parse("link 0000:01:00.0 eth0 52:54:00:12:34 1500\n", &s) < 0);
 	CHECK(netsnap_parse("link 0000:01:00.0 eth0 52:54:00:12:34:56 1500\n"
-			    "addr 0000:01:00.0 10.0.0.1/33 -\n", &s) < 0);
+			    "addr 0000:01:00.0 10.0.0.1/33 - forever forever\n", &s) < 0);
 	CHECK(netsnap_parse("link 0000:01:00.0 eth0 52:54:00:12:34:56 1500\n"
 			    "route 0000:01:00.0 0.0.0.0/0 fd00::1 0 4 0\n", &s) < 0);
 	CHECK(netsnap_parse("bogus 0000:01:00.0\n", &s) < 0);
@@ -48,6 +54,7 @@ static void malformed_lines_are_refused(void)
 
 static char trace[2048];
 static int missing_pci;
+static time_t clock_now = 1000000000;
 
 static int fake_find(const char *pci, char *name, size_t len, int *ifindex)
 {
@@ -78,10 +85,15 @@ static int fake_talk(void *ctx, struct rtnl_req *r)
 		const struct ifaddrmsg *ifa = rtnl_body(&r->hdr);
 		char ip[INET6_ADDRSTRLEN];
 
+		struct ifa_cacheinfo ci;
+
 		a = rtnl_attr(&r->hdr, sizeof(*ifa), IFA_LOCAL);
 		inet_ntop(ifa->ifa_family, rtnl_attr_data(a), ip, sizeof(ip));
-		snprintf(line, sizeof(line), "addr %s/%u%s;", ip, ifa->ifa_prefixlen,
-			 ifa->ifa_flags & IFA_F_NODAD ? " nodad" : "");
+		memcpy(&ci, rtnl_attr_data(rtnl_attr(&r->hdr, sizeof(*ifa), IFA_CACHEINFO)),
+		       sizeof(ci));
+		snprintf(line, sizeof(line), "addr %s/%u%s %d/%d;", ip, ifa->ifa_prefixlen,
+			 ifa->ifa_flags & IFA_F_NODAD ? " nodad" : "",
+			 (int)ci.ifa_valid, (int)ci.ifa_prefered);
 		break;
 	}
 	case RTM_NEWROUTE: {
@@ -98,7 +110,12 @@ static int fake_talk(void *ctx, struct rtnl_req *r)
 	return 0;
 }
 
-static const struct netsnap_env env = { fake_find, fake_talk, NULL };
+static time_t fake_now(void)
+{
+	return clock_now;
+}
+
+static const struct netsnap_env env = { fake_find, fake_talk, fake_now, NULL };
 
 static void each_link_is_named_raised_addressed_and_routed(void)
 {
@@ -107,10 +124,11 @@ static void each_link_is_named_raised_addressed_and_routed(void)
 	CHECK_EQ(netsnap_parse(snapshot, &s), 0);
 	trace[0] = '\0';
 	missing_pci = 0;
+	clock_now = 1000000000;
 	CHECK_EQ(netsnap_apply(&env, &s, NULL), 2);
 	CHECK_STREQ(trace,
 		    "link 7 name enp1s0;link 7 up;"
-		    "addr 192.168.122.59/24 nodad;addr fd00::59/64 nodad;"
+		    "addr 192.168.122.59/24 nodad 3600/1800;addr fd00::59/64 nodad -1/-1;"
 		    "route /16;route /0 via;"
 		    "link 7 name enp2s0;link 7 up;");
 }
@@ -129,9 +147,27 @@ static void a_nic_that_never_appears_is_skipped(void)
 	CHECK(!restored[1]);
 }
 
+static void a_lease_keeps_only_what_is_left_of_it(void)
+{
+	static struct netsnap s;
+
+	CHECK_EQ(netsnap_parse(snapshot, &s), 0);
+	trace[0] = '\0';
+	missing_pci = 0;
+	clock_now = 1000002000;
+	netsnap_apply(&env, &s, NULL);
+	CHECK(strstr(trace, "addr 192.168.122.59/24 nodad 1600/0;"));
+	clock_now = 1000003600;
+	trace[0] = '\0';
+	netsnap_apply(&env, &s, NULL);
+	CHECK(!strstr(trace, "192.168.122.59"));
+	CHECK(strstr(trace, "addr fd00::59/64"));
+}
+
 TEST_MAIN({
 	RUN(a_snapshot_survives_formatting);
 	RUN(malformed_lines_are_refused);
 	RUN(each_link_is_named_raised_addressed_and_routed);
 	RUN(a_nic_that_never_appears_is_skipped);
+	RUN(a_lease_keeps_only_what_is_left_of_it);
 })

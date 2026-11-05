@@ -4,6 +4,7 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <time.h>
 
 #include "kmorph/parse.h"
 #include "kmorph/rtnl.h"
@@ -19,6 +20,7 @@
 #define NETSNAP_MAX_LINKS	8
 #define NETSNAP_MAX_ADDRS	16
 #define NETSNAP_MAX_ROUTES	32
+#define NETSNAP_TEXT_MAX	16384
 
 struct netsnap_addr {
 	uint8_t family;
@@ -26,6 +28,9 @@ struct netsnap_addr {
 	bool has_brd;
 	uint8_t addr[16];
 	uint8_t brd[16];
+	/* Wall clock seconds, shared by both kernels of the machine; 0: forever */
+	int64_t valid_until;
+	int64_t preferred_until;
 };
 
 struct netsnap_route {
@@ -70,13 +75,15 @@ struct netsnap_env {
 	/* The interface on a PCI function once its driver created it; 0 or -errno. */
 	int (*find)(const char *pci, char *name, size_t len, int *ifindex);
 	int (*talk)(void *ctx, struct rtnl_req *r);
+	time_t (*now)(void);
 	void *ctx;
 };
 
 extern const struct netsnap_env netsnap_default_env;
 
 /*
- * Puts each link's name, MAC, MTU, addresses and routes back, marking
+ * Puts each link's name, MAC, MTU, addresses and routes back, with what
+ * is left of each address's lifetimes, marking
  * in restored (one per link, may be NULL) those that came up; returns
  * how many did.
  */
