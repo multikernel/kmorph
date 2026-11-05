@@ -146,3 +146,83 @@ void self_info_free(struct self_info *s)
 	rangeset_free(&s->reserved);
 	memset(s, 0, sizeof(*s));
 }
+
+static int read_be_cells(const char *path, unsigned int cells, uint64_t *out)
+{
+	const fdt32_t *p;
+	void *buf;
+	size_t len, i;
+	int ret;
+
+	ret = file_read(path, &buf, &len);
+	if (ret)
+		return ret;
+	p = buf;
+	*out = 0;
+	if (!cells || cells > 2 || len != cells * sizeof(*p))
+		ret = -EINVAL;
+	for (i = 0; !ret && i < cells; i++)
+		*out = *out << 32 | fdt32_to_cpu(p[i]);
+	free(buf);
+	return ret;
+}
+
+static bool is_cpu_node(const char *cpus_dir, const char *name)
+{
+	char path[PATH_MAX], *type;
+	size_t len;
+	bool cpu;
+
+	snprintf(path, sizeof(path), "%s/%s/device_type", cpus_dir, name);
+	if (file_read(path, (void **)&type, &len))
+		return false;
+	cpu = len == sizeof("cpu") && !memcmp(type, "cpu", sizeof("cpu"));
+	free(type);
+	return cpu;
+}
+
+int devtree_read_cpus(const char *cpus_dir, struct cpulist *out)
+{
+	char path[PATH_MAX];
+	struct dirent *de;
+	uint64_t cells, id;
+	size_t cap = 0;
+	DIR *d;
+	int ret;
+
+	out->ids = NULL;
+	out->count = 0;
+	snprintf(path, sizeof(path), "%s/#address-cells", cpus_dir);
+	ret = read_be_cells(path, 1, &cells);
+	if (ret)
+		return ret;
+	d = opendir(cpus_dir);
+	if (!d)
+		return -errno;
+	while (!ret && (de = readdir(d))) {
+		if (de->d_name[0] == '.')
+			continue;
+		if (!is_cpu_node(cpus_dir, de->d_name))
+			continue;
+		snprintf(path, sizeof(path), "%s/%s/reg", cpus_dir, de->d_name);
+		ret = read_be_cells(path, cells, &id);
+		if (!ret && out->count == cap) {
+			uint64_t *ids = realloc(out->ids, (cap = cap ? cap * 2 : 16) * sizeof(*ids));
+
+			if (ids)
+				out->ids = ids;
+			else
+				ret = -ENOMEM;
+		}
+		if (!ret)
+			out->ids[out->count++] = id;
+	}
+	closedir(d);
+	if (!ret && !out->count)
+		ret = -ENOENT;
+	if (ret)
+		cpulist_free(out);
+	else
+		cpulist_normalize(out);
+	return ret;
+}

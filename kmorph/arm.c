@@ -9,6 +9,7 @@
 #include "kmorph/cpio.h"
 #include "kmorph/crashinfo.h"
 #include "kmorph/devname.h"
+#include "kmorph/devtree.h"
 #include "kmorph/dt.h"
 #include "kmorph/log.h"
 #include "kmorph/mksys.h"
@@ -38,6 +39,7 @@ const struct arm_hooks arm_default_hooks = {
 	.class_root = DEVNAME_CLASS_ROOT,
 	.usb_root = DEVNAME_USB_ROOT,
 	.own_host_tree = HOST_TREE_DIR,
+	.dt_cpus = DEVTREE_CPUS,
 };
 
 static bool strlist_has(const struct strlist *l, const char *s)
@@ -256,10 +258,18 @@ static void inherit_cpus_from_own_host_tree(const struct arm_hooks *h, struct ho
 	host_tree_free(&own);
 }
 
+/* A machine booted from a firmware device tree has no MADT; its /cpus names every CPU. */
+static void cpus_from_firmware_tree(const struct arm_hooks *h, struct host_tree *ht)
+{
+	if (h->dt_cpus && !devtree_read_cpus(h->dt_cpus, &ht->cpus))
+		log_info("no ACPI tables; machine CPUs from %s", h->dt_cpus);
+}
+
 /*
  * The host tree the successor boots with: every CPU on the machine (from
- * the config, else the firmware's MADT), the machine's RAM, and its PCI
- * devices. The successor can only fence and adopt what is named here.
+ * the config, else the firmware's MADT or device tree), the machine's RAM,
+ * and its PCI devices. The successor can only fence and adopt what is
+ * named here.
  */
 static int build_host_tree(const struct kmorph_config *cfg, const struct arm_hooks *h,
 			   struct host_tree *ht)
@@ -276,6 +286,8 @@ static int build_host_tree(const struct kmorph_config *cfg, const struct arm_hoo
 	}
 	if (no_madt)
 		inherit_cpus_from_own_host_tree(h, ht);
+	if (no_madt && !ht->cpus.count)
+		cpus_from_firmware_tree(h, ht);
 	if (!ht->cpus.count) {
 		log_err("no machine CPU list: %s unreadable (%s) and machine_cpus unset",
 			h->madt_path, strerror(-ret));

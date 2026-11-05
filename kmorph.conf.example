@@ -13,7 +13,8 @@ kernel  = /boot/vmlinuz
 # Initramfs for the successor. Default: the image 'kmorph init' writes.
 #initrd = /var/lib/kmorph/successor.img
 
-# CPUs for the successor, as physical (APIC) ids, e.g. 1 or 12-15,20.
+# CPUs for the successor, as physical ids (APIC ids on x86, MPIDRs on
+# arm64), e.g. 1 or 12-15,20.
 cpus    = 1
 
 # Memory for the successor, e.g. 128MB or 4GB.
@@ -30,7 +31,8 @@ memory  = 128MB
 # Instance name in /sys/fs/multikernel/instances.
 #name = successor
 
-# Every CPU on the machine. Set only on a machine without ACPI.
+# Every CPU on the machine. Set only on a machine with neither ACPI nor
+# a firmware device tree.
 #machine_cpus = 0-3
 
 # Kernel modules the distro image builders add to the successor image,

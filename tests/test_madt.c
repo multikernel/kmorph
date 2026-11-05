@@ -36,6 +36,17 @@ static size_t put_x2apic(unsigned char *t, size_t off, uint32_t apic_id, uint32_
 	return off + 16;
 }
 
+/* GICC, ACPI 6.0 layout: flags at 12, MPIDR at 68 */
+static size_t put_gicc(unsigned char *t, size_t off, uint64_t mpidr, uint32_t flags)
+{
+	memset(t + off, 0, 80);
+	t[off] = 0x0b;
+	t[off + 1] = 80;
+	memcpy(t + off + 12, &flags, 4);
+	memcpy(t + off + 68, &mpidr, 8);
+	return off + 80;
+}
+
 static void finish(unsigned char *t, size_t len)
 {
 	uint32_t l = len;
@@ -74,6 +85,28 @@ static void lists_enabled_and_online_capable_cpus_in_id_order(void)
 	cpulist_free(&cpus);
 }
 
+static void lists_arm64_cpus_by_mpidr(void)
+{
+	unsigned char t[512];
+	char path[512];
+	struct cpulist cpus;
+	size_t off = put_header(t);
+
+	off = put_gicc(t, off, 0x100, 1);		/* enabled */
+	off = put_gicc(t, off, 0x80000000, 1);		/* RES1 bit 31: MPIDR 0 */
+	off = put_gicc(t, off, 0x101, 2);		/* perf interrupt mode only: off */
+	off = put_gicc(t, off, 0x0100000102ULL, 8);	/* online capable, Aff3 1 */
+	finish(t, off);
+	write_table("gicc", t, off, path);
+
+	CHECK_EQ(madt_read_cpus(path, &cpus), 0);
+	CHECK_EQ(cpus.count, 3);
+	CHECK_EQ(cpus.ids[0], 0);
+	CHECK_EQ(cpus.ids[1], 0x100);
+	CHECK_EQ(cpus.ids[2], 0x0100000102ULL);
+	cpulist_free(&cpus);
+}
+
 static void rejects_bad_tables(void)
 {
 	unsigned char t[64];
@@ -100,5 +133,6 @@ TEST_MAIN({
 		return 1;
 	}
 	RUN(lists_enabled_and_online_capable_cpus_in_id_order);
+	RUN(lists_arm64_cpus_by_mpidr);
 	RUN(rejects_bad_tables);
 })

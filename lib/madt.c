@@ -8,12 +8,22 @@
 #define MADT_HEADER_LEN 44
 #define MADT_ENTRY_LAPIC 0
 #define MADT_ENTRY_X2APIC 9
+#define MADT_ENTRY_GICC 0x0b
 #define MADT_CPU_ENABLED 0x1
 #define MADT_CPU_ONLINE_CAPABLE 0x2
+#define MADT_GICC_ONLINE_CAPABLE 0x8
+#define MADT_GICC_MPIDR 68
+/* The affinity fields, as the kernel keys a CPU by them */
+#define MPIDR_HWID_MASK 0xff00ffffffULL
 
 static uint32_t le32(const unsigned char *p)
 {
 	return p[0] | p[1] << 8 | p[2] << 16 | (uint32_t)p[3] << 24;
+}
+
+static uint64_t le64(const unsigned char *p)
+{
+	return le32(p) | (uint64_t)le32(p + 4) << 32;
 }
 
 static int cpulist_push(struct cpulist *l, size_t *cap, uint64_t id)
@@ -48,6 +58,11 @@ static int madt_entry_cpu(const unsigned char *e, uint8_t len, uint64_t *id)
 		*id = le32(e + 4);
 		flags = le32(e + 8);
 		break;
+	case MADT_ENTRY_GICC:
+		if (len < MADT_GICC_MPIDR + 8)
+			return 0;
+		*id = le64(e + MADT_GICC_MPIDR) & MPIDR_HWID_MASK;
+		return (le32(e + 12) & (MADT_CPU_ENABLED | MADT_GICC_ONLINE_CAPABLE)) ? 1 : 0;
 	default:
 		return 0;
 	}
