@@ -5,12 +5,13 @@
 #include <stddef.h>
 
 /*
- * The multikernel kexec loader takes an ELF vmlinux. A bzImage carries
- * one compressed inside; it is extracted with the matching system
- * decompressor into an anonymous file.
+ * The multikernel kexec loader takes an ELF vmlinux on x86 and an Image
+ * on arm64. A bzImage carries the ELF compressed inside; it is extracted
+ * with the matching system decompressor into an anonymous file.
  */
 
 bool vmlinux_is_bzimage(const void *image, size_t len);
+bool vmlinux_is_arm64_image(const void *image, size_t len);
 int vmlinux_locate_payload(const void *image, size_t len, size_t *offset, size_t *payload_len);
 const char *vmlinux_decompressor(const void *payload, size_t len);
 size_t vmlinux_elf_size(const void *elf, size_t len);

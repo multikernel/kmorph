@@ -7,7 +7,7 @@
 
 # --- Successor (predecessor side, read by kmorph) ---
 
-# Kernel image: an ELF vmlinux or a bzImage.
+# Kernel image: an ELF vmlinux or a bzImage; an Image on arm64.
 kernel  = /boot/vmlinuz
 
 # Initramfs for the successor. Default: the image 'kmorph init' writes.

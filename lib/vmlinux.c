@@ -53,6 +53,17 @@ int vmlinux_locate_payload(const void *image, size_t len, size_t *offset, size_t
 	return 0;
 }
 
+/* arm64 boot header (Documentation/arch/arm64/booting.rst) */
+#define ARM64_IMAGE_MAGIC_OFFSET	0x38
+
+bool vmlinux_is_arm64_image(const void *image, size_t len)
+{
+	const unsigned char *p = image;
+
+	return len >= ARM64_IMAGE_MAGIC_OFFSET + 4 &&
+	       !memcmp(p + ARM64_IMAGE_MAGIC_OFFSET, "ARM\x64", 4);
+}
+
 static const struct {
 	const char *magic;
 	size_t magic_len;
@@ -214,7 +225,7 @@ int vmlinux_open(const char *path)
 
 	if (vmlinux_is_bzimage(image, len))
 		fd = extract_vmlinux(image, len);
-	else if (vmlinux_elf_size(image, len))
+	else if (vmlinux_elf_size(image, len) || vmlinux_is_arm64_image(image, len))
 		fd = open(path, O_RDONLY | O_CLOEXEC);
 	else
 		fd = -EINVAL;

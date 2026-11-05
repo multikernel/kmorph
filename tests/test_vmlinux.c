@@ -149,6 +149,23 @@ static void open_keeps_an_elf_larger_than_the_inspected_head(void)
 	free(elf);
 }
 
+static void open_returns_arm64_images_as_they_are(void)
+{
+	unsigned char img[128] = { 0 };
+	char path[256];
+	int fd;
+
+	memcpy(img + 0x38, "ARM\x64", 4);
+	CHECK(vmlinux_is_arm64_image(img, sizeof(img)));
+	CHECK(!vmlinux_is_arm64_image(img, 0x3b));
+	snprintf(path, sizeof(path), "%s/Image", dir);
+	CHECK_EQ(file_write(path, img, sizeof(img)), 0);
+	fd = vmlinux_open(path);
+	CHECK(fd >= 0);
+	CHECK_EQ(lseek(fd, 0, SEEK_END), (off_t)sizeof(img));
+	close(fd);
+}
+
 static void open_rejects_missing_or_bogus_images(void)
 {
 	char path[256];
@@ -170,5 +187,6 @@ TEST_MAIN({
 	RUN(open_returns_elf_files_as_they_are);
 	RUN(open_extracts_gzipped_bzimage_into_memfd);
 	RUN(open_keeps_an_elf_larger_than_the_inspected_head);
+	RUN(open_returns_arm64_images_as_they_are);
 	RUN(open_rejects_missing_or_bogus_images);
 })
