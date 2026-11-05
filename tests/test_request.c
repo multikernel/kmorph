@@ -41,8 +41,27 @@ static void status_reply_is_parsed_back(void)
 	CHECK(request_parse_status("err something\n", &r) < 0);
 }
 
+static void handover_reply_round_trips(void)
+{
+	char buf[128], reason[64];
+
+	CHECK(request_format_handover(NULL, buf, sizeof(buf)) > 0);
+	CHECK_STREQ(buf, "ok fencing\n");
+	CHECK_EQ(request_parse_handover(buf, reason, sizeof(reason)), 0);
+
+	CHECK(request_format_handover("state=SUSPECT predecessor=silent", buf, sizeof(buf)) > 0);
+	CHECK_STREQ(buf, "refused state=SUSPECT predecessor=silent\n");
+	CHECK_EQ(request_parse_handover(buf, reason, sizeof(reason)), -EBUSY);
+	CHECK_STREQ(reason, "state=SUSPECT predecessor=silent");
+
+	CHECK_EQ(request_parse_handover("err unsupported request\n", reason, sizeof(reason)),
+		 -EINVAL);
+	CHECK_EQ(request_parse_handover("refused \n", reason, sizeof(reason)), -EINVAL);
+}
+
 TEST_MAIN({
 	RUN(status_request_is_recognised);
 	RUN(status_reply_is_one_line);
 	RUN(status_reply_is_parsed_back);
+	RUN(handover_reply_round_trips);
 })

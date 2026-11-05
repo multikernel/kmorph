@@ -6,8 +6,8 @@
  * ops table, so the sequence is testable without a kernel.
  *
  * ARMED -> SUSPECT -> FENCING -> FENCED -> TAKEN_OVER
- *                        |
- *                        v
+ *   |                    ^  |
+ *   +--- handover -------+  v
  *                   FENCE_FAILED (retried on later silence, bounded)
  */
 
@@ -23,7 +23,7 @@ enum takeover_state {
 enum takeover_event {
 	TK_EV_PROBE_ALIVE,
 	TK_EV_PROBE_SILENT,
-	TK_EV_REQUEST,		/* a planned handover; unused in v1 */
+	TK_EV_REQUEST,		/* the predecessor hands over; honoured only when ARMED */
 };
 
 struct takeover;

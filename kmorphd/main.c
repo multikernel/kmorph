@@ -56,6 +56,7 @@ struct daemon {
 	int last_probe_err;
 	uint64_t last_probe_ms;
 	bool probe_reported;
+	bool handed_over;
 };
 
 static uint64_t now_ms(void)
@@ -71,7 +72,7 @@ static void fill_status(const struct daemon *d, struct status_reply *r)
 	memset(r, 0, sizeof(*r));
 	snprintf(r->state, sizeof(r->state), "%s", takeover_state_name(d->tk.state));
 	snprintf(r->predecessor, sizeof(r->predecessor), "%s",
-		 probe_result_name(d->last_result));
+		 d->handed_over ? "handed-over" : probe_result_name(d->last_result));
 	r->last_probe_ms = d->last_probe_ms ? now_ms() - d->last_probe_ms : 0;
 	r->last_error = d->tk.last_error;
 }
@@ -172,40 +173,69 @@ static void on_probe_ready(struct daemon *d)
 	deliver_probe(d, err);
 }
 
-static void answer_request(struct daemon *d, int fd)
+/* Only a live predecessor that is not already suspected may hand over. */
+static int answer_handover(const struct daemon *d, char *reply, size_t len, bool *accepted)
+{
+	char reason[64];
+
+	*accepted = d->tk.state == TK_ARMED && d->last_result == PROBE_ALIVE;
+	snprintf(reason, sizeof(reason), "state=%s predecessor=%s",
+		 takeover_state_name(d->tk.state), probe_result_name(d->last_result));
+	return request_format_handover(*accepted ? NULL : reason, reply, len);
+}
+
+/* Returns whether the predecessor handed over. */
+static bool answer_request(struct daemon *d, int fd)
 {
 	struct pollfd pfd = { .fd = fd, .events = POLLIN };
 	struct status_reply r;
 	enum request_kind kind;
 	char line[64], reply[128];
+	bool accepted = false;
 	ssize_t n;
 	int len;
 
 	if (poll(&pfd, 1, 500) <= 0)
-		return;
+		return false;
 	n = recv(fd, line, sizeof(line) - 1, MSG_DONTWAIT);
 	if (n <= 0)
-		return;
+		return false;
 	line[n] = '\0';
 
-	if (request_parse(line, &kind) || kind != REQUEST_STATUS) {
+	if (request_parse(line, &kind)) {
 		len = snprintf(reply, sizeof(reply), "err unsupported request\n");
+	} else if (kind == REQUEST_HANDOVER) {
+		len = answer_handover(d, reply, sizeof(reply), &accepted);
 	} else {
 		fill_status(d, &r);
 		len = request_format_status(&r, reply, sizeof(reply));
 	}
 	if (len > 0)
 		send(fd, reply, len, MSG_NOSIGNAL);
+	return accepted;
+}
+
+/* Nothing crashed, so the predecessor's memory is taken over without a dump. */
+static void take_handover(struct daemon *d)
+{
+	log_info("predecessor hands over");
+	d->handed_over = true;
+	d->ops.env.dump_path = NULL;
+	takeover_handle(&d->tk, TK_EV_REQUEST);
 }
 
 static void on_connection(struct daemon *d)
 {
 	int fd = accept4(d->listen_fd, NULL, NULL, SOCK_CLOEXEC);
+	bool handover;
 
 	if (fd < 0)
 		return;
-	answer_request(d, fd);
+	handover = answer_request(d, fd);
+	/* The answer leaves before the fence stops the predecessor reading it */
 	close(fd);
+	if (handover)
+		take_handover(d);
 }
 
 static int open_listener(void)

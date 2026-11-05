@@ -62,7 +62,8 @@ static void handle_watching(struct takeover *t, enum takeover_event ev)
 			set_state(t, TK_SUSPECT);
 		break;
 	case TK_EV_REQUEST:
-		begin_takeover(t);
+		if (t->state == TK_ARMED)
+			begin_takeover(t);
 		break;
 	}
 }

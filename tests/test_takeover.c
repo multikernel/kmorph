@@ -168,6 +168,18 @@ static void request_event_starts_takeover_directly(void)
 	CHECK_STREQ(f.calls, "FAPR");
 }
 
+static void request_is_ignored_once_suspect(void)
+{
+	struct fake f = { 0 };
+	struct takeover t;
+
+	takeover_init(&t, &ops, &f, 5, 0);
+	takeover_handle(&t, TK_EV_PROBE_SILENT);
+	takeover_handle(&t, TK_EV_REQUEST);
+	CHECK_EQ(t.state, TK_SUSPECT);
+	CHECK_STREQ(f.calls, "");
+}
+
 static void state_names_are_stable(void)
 {
 	CHECK_STREQ(takeover_state_name(TK_ARMED), "ARMED");
@@ -187,5 +199,6 @@ TEST_MAIN({
 	RUN(adopt_failure_resumes_from_fenced);
 	RUN(preserve_failure_keeps_memory_unreaped);
 	RUN(request_event_starts_takeover_directly);
+	RUN(request_is_ignored_once_suspect);
 	RUN(state_names_are_stable);
 })

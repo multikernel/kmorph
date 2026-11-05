@@ -13,7 +13,7 @@
 
 enum request_kind {
 	REQUEST_STATUS,
-	REQUEST_HANDOVER,	/* reserved for the planned takeover */
+	REQUEST_HANDOVER,	/* kmorph upgrade: fence me and take over */
 };
 
 struct status_reply {
@@ -26,5 +26,10 @@ struct status_reply {
 int request_parse(const char *line, enum request_kind *kind);
 int request_format_status(const struct status_reply *r, char *buf, size_t len);
 int request_parse_status(const char *line, struct status_reply *r);
+
+/* "ok fencing" when @reason is NULL, else "refused <reason>" */
+int request_format_handover(const char *reason, char *buf, size_t len);
+/* 0 when accepted, -EBUSY with @reason when refused, -EINVAL otherwise */
+int request_parse_handover(const char *line, char *reason, size_t len);
 
 #endif

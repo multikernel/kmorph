@@ -46,3 +46,24 @@ int request_parse_status(const char *line, struct status_reply *r)
 	r->last_probe_ms = ms;
 	return 0;
 }
+
+int request_format_handover(const char *reason, char *buf, size_t len)
+{
+	int n = reason ? snprintf(buf, len, "refused %s\n", reason) :
+			 snprintf(buf, len, "ok fencing\n");
+
+	return n >= (int)len ? -ENOSPC : n;
+}
+
+int request_parse_handover(const char *line, char *reason, size_t len)
+{
+	size_t n = line_len(line);
+
+	if (n == 10 && !strncmp(line, "ok fencing", 10))
+		return 0;
+	if (n > 8 && !strncmp(line, "refused ", 8)) {
+		snprintf(reason, len, "%.*s", (int)(n - 8), line + 8);
+		return -EBUSY;
+	}
+	return -EINVAL;
+}
