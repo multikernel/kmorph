@@ -5,8 +5,15 @@ PREFIX  ?= /usr/local
 DESTDIR ?=
 INSTALL ?= install
 
+ifneq ($(CROSS_COMPILE),)
+CC      = $(CROSS_COMPILE)gcc
+AR      = $(CROSS_COMPILE)ar
+endif
+
 ifeq ($(STATIC),1)
+ifeq ($(CROSS_COMPILE),)
 CC      = musl-gcc
+endif
 LDFLAGS += -static
 endif
 
@@ -42,8 +49,9 @@ $(BIN)/kmorph: $(BUILD)/kmorph/main.o $(KMORPH_OBJS) $(LIBKMORPH)
 	$(CC) $(LDFLAGS) -o $@ $^
 
 # The successor runs kmorphd from an image with no libc, so the installed
-# kmorphd is static, built with musl in its own directory to keep the
-# objects apart from the host build the tests link against.
+# kmorphd is static, built with musl (the cross toolchain's libc when
+# cross compiling) in its own directory to keep the objects apart from
+# the host build the tests link against.
 ifeq ($(STATIC),1)
 KMORPHD_INSTALL = $(BIN)/kmorphd
 static-kmorphd:
