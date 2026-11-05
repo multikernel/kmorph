@@ -18,6 +18,7 @@
 #include "client.h"
 #include "image.h"
 #include "upgrade.h"
+#include "watch.h"
 
 #define STATUS_TIMEOUT_MS 2000
 
@@ -98,7 +99,7 @@ static int init_run(const struct kmorph_config *cfg)
 
 static void usage(void)
 {
-	fprintf(stderr, "usage: kmorph <init|arm|disarm|status|upgrade> [--config PATH]\n");
+	fprintf(stderr, "usage: kmorph <init|arm|disarm|status|upgrade|watch> [--config PATH]\n");
 	exit(2);
 }
 
@@ -146,6 +147,8 @@ int main(int argc, char **argv)
 		ret = status_run(&cfg, &fs);
 	else if (!strcmp(verb, "upgrade"))
 		ret = upgrade_run(&cfg, &fs);
+	else if (!strcmp(verb, "watch"))
+		ret = watch_run(&cfg, &fs);
 	else
 		usage();
 

@@ -434,6 +434,17 @@ int netsnap_collect(const char *class_net, const struct strlist *skip, struct ne
 	return ret;
 }
 
+int netsnap_text(const struct strlist *skip, char *buf, size_t len)
+{
+	static struct netsnap snap;
+	int ret;
+
+	ret = netsnap_collect("/sys/class/net", skip, &snap);
+	if (!ret)
+		ret = netsnap_format(&snap, buf, len);
+	return ret < 0 ? ret : (int)snap.count;
+}
+
 static void sleep_ms(unsigned int ms)
 {
 	struct timespec ts = { ms / 1000, (ms % 1000) * 1000000L };

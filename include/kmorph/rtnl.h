@@ -107,6 +107,12 @@ struct rtmsg {
 #define RTA_MULTIPATH	9
 #define RTA_TABLE	15
 
+#define RTMGRP_LINK		0x1
+#define RTMGRP_IPV4_IFADDR	0x10
+#define RTMGRP_IPV4_ROUTE	0x40
+#define RTMGRP_IPV6_IFADDR	0x100
+#define RTMGRP_IPV6_ROUTE	0x400
+
 #define RT_TABLE_MAIN	254
 #define RTN_UNICAST	1
 #define RTPROT_KERNEL	2
@@ -135,6 +141,8 @@ const void *rtnl_attr_data(const struct rtattr *a);
 size_t rtnl_attr_len(const struct rtattr *a);
 
 int rtnl_open(void);
+/* A socket that also hears the changes announced to the RTMGRP_* groups. */
+int rtnl_open_groups(uint32_t groups);
 /* Sends a request and waits for its acknowledgement: 0 or the kernel's -errno. */
 int rtnl_talk(int fd, struct rtnl_req *r);
 /* Dumps every object of the type, calling cb on each message. */

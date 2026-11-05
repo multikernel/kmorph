@@ -4,14 +4,15 @@
 static void status_request_is_recognised(void)
 {
 	enum request_kind k;
+	size_t len;
 
-	CHECK_EQ(request_parse("status\n", &k), 0);
+	CHECK_EQ(request_parse("status\n", &k, &len), 0);
 	CHECK_EQ(k, REQUEST_STATUS);
-	CHECK_EQ(request_parse("status", &k), 0);
-	CHECK_EQ(request_parse("handover\n", &k), 0);
+	CHECK_EQ(request_parse("status", &k, &len), 0);
+	CHECK_EQ(request_parse("handover\n", &k, &len), 0);
 	CHECK_EQ(k, REQUEST_HANDOVER);
-	CHECK(request_parse("reboot\n", &k) < 0);
-	CHECK(request_parse("", &k) < 0);
+	CHECK(request_parse("reboot\n", &k, &len) < 0);
+	CHECK(request_parse("", &k, &len) < 0);
 }
 
 static void status_reply_is_one_line(void)
@@ -59,9 +60,40 @@ static void handover_reply_round_trips(void)
 	CHECK_EQ(request_parse_handover("refused \n", reason, sizeof(reason)), -EINVAL);
 }
 
+static void network_request_carries_its_length(void)
+{
+	enum request_kind k;
+	char buf[32];
+	size_t len;
+
+	CHECK(request_format_network(1234, buf, sizeof(buf)) > 0);
+	CHECK_STREQ(buf, "network 1234\n");
+	CHECK_EQ(request_parse(buf, &k, &len), 0);
+	CHECK_EQ(k, REQUEST_NETWORK);
+	CHECK_EQ(len, 1234);
+	CHECK(request_parse("network\n", &k, &len) < 0);
+	CHECK(request_parse("network 12x\n", &k, &len) < 0);
+	CHECK(request_parse("network 99999999\n", &k, &len) < 0);
+}
+
+static void network_reply_round_trips(void)
+{
+	char buf[64], reason[32];
+
+	CHECK(request_format_network_reply(NULL, buf, sizeof(buf)) > 0);
+	CHECK_STREQ(buf, "ok network\n");
+	CHECK_EQ(request_parse_network_reply(buf, reason, sizeof(reason)), 0);
+	CHECK_EQ(request_parse_handover(buf, reason, sizeof(reason)), -EINVAL);
+	CHECK(request_format_network_reply("state=TAKEN_OVER", buf, sizeof(buf)) > 0);
+	CHECK_EQ(request_parse_network_reply(buf, reason, sizeof(reason)), -EBUSY);
+	CHECK_STREQ(reason, "state=TAKEN_OVER");
+}
+
 TEST_MAIN({
 	RUN(status_request_is_recognised);
 	RUN(status_reply_is_one_line);
 	RUN(status_reply_is_parsed_back);
 	RUN(handover_reply_round_trips);
+	RUN(network_request_carries_its_length);
+	RUN(network_reply_round_trips);
 })

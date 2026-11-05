@@ -27,17 +27,13 @@
 
 static int net_snapshot(const struct strlist *skip, char **text)
 {
-	static struct netsnap snap;
-	char buf[16384];
-	int ret;
+	char buf[NETSNAP_TEXT_MAX];
+	int ret = netsnap_text(skip, buf, sizeof(buf));
 
-	ret = netsnap_collect("/sys/class/net", skip, &snap);
-	if (!ret)
-		ret = netsnap_format(&snap, buf, sizeof(buf));
 	if (ret < 0)
 		return ret;
 	*text = strdup(buf);
-	return *text ? (int)snap.count : -ENOMEM;
+	return *text ? ret : -ENOMEM;
 }
 
 const struct arm_hooks arm_default_hooks = {

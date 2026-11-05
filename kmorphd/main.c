@@ -202,28 +202,94 @@ static int answer_handover(const struct daemon *d, char *reply, size_t len, bool
 	return request_format_handover(*accepted ? NULL : reason, reply, len);
 }
 
+static struct netsnap network;
+
+/* What the predecessor sees now replaces what it saw at arm time, until the fence. */
+static int answer_network(struct daemon *d, const char *text, char *reply, size_t len)
+{
+	static struct netsnap next;
+	char reason[64];
+
+	if (d->tk.state >= TK_FENCING) {
+		snprintf(reason, sizeof(reason), "state=%s", takeover_state_name(d->tk.state));
+		return request_format_network_reply(reason, reply, len);
+	}
+	if (netsnap_parse(text, &next))
+		return request_format_network_reply("malformed", reply, len);
+	network = next;
+	d->ops.env.network = &network;
+	/* A restarted kmorphd picks the latest identity up from here */
+	if (file_write(STANDBY_NETWORK, text, strlen(text)))
+		log_warn("network: cannot keep the identity in %s", STANDBY_NETWORK);
+	log_info("network: identity of %zu interfaces updated by the predecessor", network.count);
+	return request_format_network_reply(NULL, reply, len);
+}
+
+#define REQUEST_WAIT_MS	500
+#define REQUEST_LINE_MAX 64
+
+/* The request line and its payload, NUL terminated; the line length, or -errno. */
+static int read_request(int fd, char *buf, size_t cap, enum request_kind *kind, size_t *payload)
+{
+	uint64_t deadline = now_ms() + REQUEST_WAIT_MS;
+	size_t got = 0, line = 0;
+
+	for (;;) {
+		struct pollfd pfd = { .fd = fd, .events = POLLIN };
+		uint64_t now = now_ms();
+		char *nl;
+		ssize_t n;
+
+		if (now >= deadline || poll(&pfd, 1, deadline - now) <= 0)
+			return -ETIMEDOUT;
+		n = recv(fd, buf + got, cap - 1 - got, MSG_DONTWAIT);
+		if (n <= 0)
+			return n ? -errno : -ECONNRESET;
+		got += n;
+		buf[got] = '\0';
+		if (!line) {
+			char head[REQUEST_LINE_MAX + 1];
+
+			nl = memchr(buf, '\n', got);
+			if (!nl)
+				continue;
+			line = nl - buf + 1;
+			if (line > REQUEST_LINE_MAX)
+				return -EINVAL;
+			memcpy(head, buf, line);
+			head[line] = '\0';
+			if (request_parse(head, kind, payload))
+				return -EINVAL;
+			if (line + *payload >= cap)
+				return -E2BIG;
+		}
+		if (got >= line + *payload) {
+			buf[line + *payload] = '\0';
+			return line;
+		}
+	}
+}
+
 /* Returns whether the predecessor handed over. */
 static bool answer_request(struct daemon *d, int fd)
 {
-	struct pollfd pfd = { .fd = fd, .events = POLLIN };
+	static char buf[REQUEST_LINE_MAX + NETSNAP_TEXT_MAX];
 	struct status_reply r;
 	enum request_kind kind;
-	char line[64], reply[128];
 	bool accepted = false;
-	ssize_t n;
-	int len;
+	char reply[128];
+	size_t payload;
+	int len, line;
 
-	if (poll(&pfd, 1, 500) <= 0)
+	line = read_request(fd, buf, sizeof(buf), &kind, &payload);
+	if (line == -ETIMEDOUT || line == -ECONNRESET)
 		return false;
-	n = recv(fd, line, sizeof(line) - 1, MSG_DONTWAIT);
-	if (n <= 0)
-		return false;
-	line[n] = '\0';
-
-	if (request_parse(line, &kind)) {
+	if (line < 0) {
 		len = snprintf(reply, sizeof(reply), "err unsupported request\n");
 	} else if (kind == REQUEST_HANDOVER) {
 		len = answer_handover(d, reply, sizeof(reply), &accepted);
+	} else if (kind == REQUEST_NETWORK) {
+		len = answer_network(d, buf + line, reply, sizeof(reply));
 	} else {
 		fill_status(d, &r);
 		len = request_format_status(&r, reply, sizeof(reply));
@@ -316,7 +382,7 @@ static int open_signals(bool init)
 static const struct netsnap *load_network(void)
 {
 	static const char *const paths[] = { STANDBY_NETWORK, NETSNAP_PATH };
-	static struct netsnap snap;
+	struct netsnap *snap = &network;
 	char *text;
 	size_t i;
 	int ret;
@@ -324,14 +390,14 @@ static const struct netsnap *load_network(void)
 	for (i = 0; i < sizeof(paths) / sizeof(paths[0]); i++) {
 		if (file_read_string(paths[i], &text))
 			continue;
-		ret = netsnap_parse(text, &snap);
+		ret = netsnap_parse(text, snap);
 		free(text);
 		if (ret) {
 			log_warn("network: %s is malformed; the NICs wait for the disk's config",
 				 paths[i]);
 			return NULL;
 		}
-		return snap.count ? &snap : NULL;
+		return snap->count ? snap : NULL;
 	}
 	return NULL;
 }

@@ -9,6 +9,7 @@
 #include "client.h"
 #include "freeze.h"
 #include "upgrade.h"
+#include "watch.h"
 
 #define REQUEST_TIMEOUT_MS	2000
 #define FENCE_WAIT_S		10
@@ -52,6 +53,10 @@ int upgrade_run(const struct kmorph_config *cfg, const struct mkfs *fs)
 		return ret;
 	}
 
+	ret = watch_push(id, &cfg->devices);
+	if (ret)
+		log_warn("upgrade: the successor keeps the last network identity it got: %s",
+			 strerror(-ret));
 	/* What is still only in memory here would be lost with this kernel */
 	sync();
 	ret = freeze_filesystems(&frozen);

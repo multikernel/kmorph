@@ -70,6 +70,8 @@ int netsnap_parse(const char *text, struct netsnap *s);
  * is in skip, with what rtnetlink reports for them.
  */
 int netsnap_collect(const char *class_net, const struct strlist *skip, struct netsnap *s);
+/* netsnap_collect on /sys/class/net, formatted; the link count or -errno. */
+int netsnap_text(const struct strlist *skip, char *buf, size_t len);
 
 struct netsnap_env {
 	/* The interface on a PCI function once its driver created it; 0 or -errno. */

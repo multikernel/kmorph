@@ -65,7 +65,12 @@ size_t rtnl_attr_len(const struct rtattr *a)
 
 int rtnl_open(void)
 {
-	struct sockaddr_nl sa = { .nl_family = AF_NETLINK };
+	return rtnl_open_groups(0);
+}
+
+int rtnl_open_groups(uint32_t groups)
+{
+	struct sockaddr_nl sa = { .nl_family = AF_NETLINK, .nl_groups = groups };
 	int fd = socket(AF_NETLINK, SOCK_RAW | SOCK_CLOEXEC, NETLINK_ROUTE);
 
 	if (fd < 0)
