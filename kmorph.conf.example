@@ -40,6 +40,14 @@ memory  = 128MB
 # devices handed to the successor. Ignored by the kmorph init image.
 #modules = mk_transport
 
+# systemd units the successor runs before the takeover, from a standby
+# image kmorph-mkimage builds, so that they are already up when it
+# happens. They must start without the disk and the network.
+#standby = nginx.service
+
+# Further paths the standby image carries.
+#standby_files = /usr/lib64/nginx/modules
+
 # --- Detection and takeover (successor side, read by kmorphd) ---
 
 # How often the predecessor is probed.

@@ -37,6 +37,9 @@ directly and needs no other tool.
   names, such as the vsock transport when it is a module.
 - On the predecessor, root, and `gzip`, `xz`, `zstd` or `lz4` if the
   kernel image is a bzImage rather than an ELF vmlinux.
+- For [standby services](#standby-services): dracut and erofs-utils on
+  the predecessor, and a successor kernel with `CONFIG_EROFS_FS=y` and
+  `CONFIG_EROFS_FS_BACKED_BY_FILE=y`.
 
 ## Building
 
@@ -136,6 +139,49 @@ system's own init, which brings the network, the mounts and the
 services back as at any boot: the machine continues as itself, its
 user space restarted on a kernel already running.
 
+## Standby services
+
+Restarting user space after the takeover costs as long as the slowest
+service takes to start. Services named in `standby` are instead started
+in the successor while it is armed, and keep running through the
+takeover:
+
+```ini
+standby = nginx.service
+```
+
+`kmorph-mkimage` then writes a different image: a standby root, built
+with dracut from the host's own files, holding systemd, kmorphd, each
+unit with its drop-ins, its programs and their libraries, everything
+the packages of the unit and its main program ship, `/etc`, and
+`standby_files`, packed as an EROFS image. kmorphd, as the image's init,
+mounts it, makes it the root and starts its systemd, which brings up
+the standby services. The successor owns no disk and no NIC at this
+point, so a standby service must start without either: it binds its
+ports, the machine's addresses included through `ip_nonlocal_bind`,
+and writes only to a `/var` and `/tmp` in memory.
+
+After the takeover, kmorphd starts `kmorph-switch.service`, which
+mounts the root named by `root=` on the successor's command line, moves
+every process onto it with `pivot_root`, re-executes systemd from the
+disk and starts `default.target`. The disk's own units bring the
+network and the rest of the machine up; the standby services were never
+stopped, and they are reloaded so they reopen their logs on the disk.
+
+A standby service must neither write state that has to persist nor
+reach the network before the takeover: kmorph cannot check that, and
+the service should not be one that does. A unit that runs in a mount
+namespace of its own (`PrivateTmp=`, `ProtectSystem=` and the like) is
+not reached by `pivot_root`; `kmorph-mkimage` warns about it and
+`kmorph-switch` restarts it after the takeover, which costs it the warm
+start unless a drop-in relaxes its sandbox. The root must be a plain
+partition or disk with `/usr` on it.
+
+The image is a snapshot: `kmorph-mkimage` records the files it copied
+in `successor.img.files`, `kmorph.service` rebuilds the image when one
+of them changes, and `kmorph arm` warns about a stale image.
+`memory` must hold the image and what the standby services use.
+
 ## Configuration
 
 The file is `key = value`, one per line, `#` starts a comment. Both
@@ -155,6 +201,8 @@ programs read the same file; each uses the keys for its side. `kernel`,
 | `devices` | | Devices handed to the successor, comma separated, as PCI addresses (`0000:09:00.0`) or as the names sysfs knows them by: a network interface (`enp61s0f1`), a block device (`nvme0n1`), a framebuffer (`fb0`), a USB bus (`usb1`). A name resolves to the PCI function behind it; the successor only ever sees the address. The successor owns these from boot, a NIC to be reachable while armed for instance; it adopts every other device at the takeover. |
 | `machine_cpus` | from the MADT | Every CPU on the machine. Set only on a machine without ACPI. |
 | `modules` | | Kernel modules the distro image builders add to the successor image, comma separated: the vsock transport when it is a module, drivers for devices in `devices`. The `kmorph init` image has no module loader and ignores it. |
+| `standby` | | systemd units the successor runs before the takeover, comma separated. See [Standby services](#standby-services). |
+| `standby_files` | | Further files or directories the standby image carries, such as plugins from a package other than the unit's. |
 | `console` | | Serial line the successor takes over after the crash, e.g. `ttyS0`. |
 | `console_baud` | `115200` | Speed of that line. |
 | `console_login` | | Program run on the serial line after the takeover, required with `console`. With the default image it must be a static executable, which `kmorph init` copies in; a user image carries its own. |
