@@ -1,9 +1,11 @@
 #include <errno.h>
 #include <fcntl.h>
+#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/mman.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 #include "kmorph/cpio.h"
@@ -411,6 +413,26 @@ bool arm_memory_fits(uint64_t memory, size_t image_len)
 	return memory / 3 >= image_len;
 }
 
+int arm_stale_source(const char *image, char *out, size_t len)
+{
+	char manifest[PATH_MAX], *list, *line, *save;
+	struct stat img, st;
+	int stale = 0;
+
+	if (snprintf(manifest, sizeof(manifest), "%s.files", image) >= (int)sizeof(manifest) ||
+	    stat(image, &img) < 0 || file_read_string(manifest, &list))
+		return 0;
+	for (line = strtok_r(list, "\n", &save); line; line = strtok_r(NULL, "\n", &save)) {
+		if (!lstat(line, &st) && st.st_mtime > img.st_mtime) {
+			snprintf(out, len, "%s", line);
+			stale = 1;
+			break;
+		}
+	}
+	free(list);
+	return stale;
+}
+
 /*
  * The image, then the one thing only arm knows: the config. The kernel
  * takes a cpio header only at a 4-byte aligned offset and skips zeros
@@ -421,6 +443,7 @@ static int successor_initrd(const struct kmorph_config *cfg, const struct arm_ho
 	static const char zeros[3];
 	const char *path = cfg->initrd ? cfg->initrd : h->default_initrd;
 	struct cpio extra = CPIO_INIT;
+	char stale[PATH_MAX];
 	void *image;
 	size_t len;
 	int fd, ret;
@@ -431,6 +454,9 @@ static int successor_initrd(const struct kmorph_config *cfg, const struct arm_ho
 			cfg->initrd ? "" : "; 'kmorph init' builds it");
 		return ret;
 	}
+	if (arm_stale_source(path, stale, sizeof(stale)))
+		log_warn("%s changed since %s was built; its standby services run the old "
+			 "version until rebuilt with kmorph-mkimage", stale, path);
 	if (!arm_memory_fits(cfg->memory, len))
 		log_warn("memory = %llu MB may not hold the %zu MB image once unpacked",
 			 (unsigned long long)cfg->memory >> 20, len >> 20);

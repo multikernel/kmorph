@@ -38,6 +38,12 @@ int arm_pool_add_devices(const struct kmorph_config *cfg, const struct mkfs *fs,
 /* An initramfs unpacks into the successor's RAM; three times its size is the floor. */
 bool arm_memory_fits(uint64_t memory, size_t image_len);
 
+/*
+ * A standby image lists what it was built from in <image>.files; finds
+ * the first of those changed since. Returns 1 with it in out, else 0.
+ */
+int arm_stale_source(const char *image, char *out, size_t len);
+
 int arm_run(const struct kmorph_config *cfg, const struct mkfs *fs, const struct arm_hooks *h);
 int disarm_run(const struct kmorph_config *cfg, const struct mkfs *fs, const struct arm_hooks *h);
 
