@@ -156,13 +156,10 @@ build_standby() {
 	while read -r f; do
 		[ -d "$f" ] && [ ! -L "$f" ] && mkdir -p "$staging$f" && chown --reference="$f" "$staging$f"
 	done < "$files"
-	mkdir -p "$staging/etc/systemd/system/kmorph-standby.target.wants" \
-		"$staging/etc/systemd/system/local-fs.target.wants" "$staging/var/tmp"
+	mkdir -p "$staging/etc/systemd/system/kmorph-standby.target.wants" "$staging/var/tmp"
 	ln -sf /usr/lib/systemd/system/kmorph-standby.target "$staging/etc/systemd/system/default.target"
 	ln -sf /dev/null "$staging/etc/systemd/system/systemd-vconsole-setup.service"
-	ln -sf /usr/lib/systemd/system/kmorph-standby-var.service \
-		"$staging/etc/systemd/system/local-fs.target.wants/"
-	for unit in kmorphd.service kmorph-switch.path $standby; do
+	for unit in kmorph-switch.path $standby; do
 		ln -sf "/usr/lib/systemd/system/$unit" \
 			"$staging/etc/systemd/system/kmorph-standby.target.wants/$unit"
 	done

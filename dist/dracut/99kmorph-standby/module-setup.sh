@@ -14,14 +14,11 @@ depends() {
 install() {
 	local unit
 
-	inst_binary "${KMORPHD:-/usr/bin/kmorphd}" /usr/bin/kmorphd
 	inst_multiple mount umount pivot_root udevadm systemctl sysctl \
-		readlink sed tr cp mkdir cat
+		readlink sed tr mkdir cat
 	inst_multiple -o e2fsck
 	inst_simple "$moddir/kmorph-switch" /usr/lib/kmorph/kmorph-switch
-	inst_simple "$moddir/90-kmorph-standby.conf" /etc/sysctl.d/90-kmorph-standby.conf
-	for unit in kmorph-standby.target kmorphd.service kmorph-switch.service \
-		kmorph-switch.path kmorph-standby-var.service; do
+	for unit in kmorph-standby.target kmorph-switch.service kmorph-switch.path; do
 		inst_simple "$moddir/$unit" "$systemdsystemunitdir/$unit"
 	done
 }

@@ -152,15 +152,17 @@ standby = nginx.service
 ```
 
 `kmorph-mkimage` then writes a different image: a standby root, built
-with dracut from the host's own files, holding systemd, kmorphd, each
-unit with its drop-ins, its programs and their libraries, everything
-the packages of the unit and its main program ship, `/etc`, and
-`standby_files`, packed as an EROFS image. kmorphd, as the image's init,
-mounts it, makes it the root and starts its systemd, which brings up
-the standby services. The successor owns no disk and no NIC at this
-point, so a standby service must start without either: it binds its
-ports, the machine's addresses included through `ip_nonlocal_bind`,
-and writes only to a `/var` and `/tmp` in memory.
+with dracut from the host's own files, holding systemd, each unit with
+its drop-ins, its programs and their libraries, everything the packages
+of the unit and its main program ship, `/etc`, and `standby_files`,
+packed as an EROFS image beside kmorphd. kmorphd, as the successor's
+init, mounts the image under a writable layer in memory, makes it the
+root, allows `ip_nonlocal_bind`, and forks: PID 1 becomes the image's
+systemd, which brings up the standby services, and the child goes on
+probing the predecessor without a gap. The successor owns no disk and
+no NIC at this point, so a standby service must start without either:
+it binds its ports, the machine's addresses included, and what it
+writes stays in memory.
 
 Once the takeover is done, kmorphd creates `/run/kmorph/taken-over`,
 in any image, for whatever runs next to wait for. In the standby image

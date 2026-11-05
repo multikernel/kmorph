@@ -4,6 +4,7 @@
 #include <string.h>
 #include <sys/mount.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <unistd.h>
 
 #include "kmorph/file.h"
@@ -56,6 +57,18 @@ static int sys_chroot(const char *path)
 	return chroot(path) < 0 ? -errno : 0;
 }
 
+static int sys_write(const char *path, const char *text)
+{
+	return file_write(path, text, strlen(text));
+}
+
+static int sys_fork(void)
+{
+	pid_t pid = fork();
+
+	return pid < 0 ? -errno : pid;
+}
+
 static int sys_exec(const char *path)
 {
 	char *argv[] = { (char *)path, NULL };
@@ -64,8 +77,16 @@ static int sys_exec(const char *path)
 	return -errno;
 }
 
+static void sys_idle(void)
+{
+	for (;;)
+		if (wait(NULL) < 0 && errno == ECHILD)
+			pause();
+}
+
 const struct standby_env standby_default_env = {
-	sys_mount, sys_umount, sys_mkdir, sys_copy, sys_chdir, sys_chroot, sys_exec,
+	sys_mount, sys_umount, sys_mkdir, sys_copy, sys_chdir, sys_chroot, sys_write,
+	sys_fork, sys_exec, sys_idle,
 };
 
 static void moved_path(char *buf, size_t len, const char *fs)
@@ -119,21 +140,52 @@ static int make_root(const struct standby_env *env)
 	return ret;
 }
 
+static const char *const layer_dirs[] = {
+	"/run/kmorph", STANDBY_LAYERS, STANDBY_LAYERS "/image", STANDBY_LAYERS "/upper",
+	STANDBY_LAYERS "/work", STANDBY_ROOT,
+};
+
+/* The standby services write where they please; what they write lives in memory. */
+static int mount_root(const struct standby_env *env)
+{
+	size_t i;
+	int ret = 0;
+
+	for (i = 0; i < sizeof(layer_dirs) / sizeof(layer_dirs[0]) && !ret; i++)
+		ret = env->mkdir(layer_dirs[i]);
+	if (!ret)
+		ret = env->mount(STANDBY_IMAGE, STANDBY_LAYERS "/image", "erofs", MS_RDONLY, NULL);
+	if (ret)
+		return ret;
+	ret = env->mount("overlay", STANDBY_ROOT, "overlay", 0,
+			 "lowerdir=" STANDBY_LAYERS "/image,upperdir=" STANDBY_LAYERS
+			 "/upper,workdir=" STANDBY_LAYERS "/work");
+	if (ret)
+		env->umount(STANDBY_LAYERS "/image");
+	return ret;
+}
+
+/* Standby services bind the machine's addresses before the successor owns a NIC. */
+static void allow_nonlocal_bind(const struct standby_env *env)
+{
+	int ret = env->write("/proc/sys/net/ipv4/ip_nonlocal_bind", "1");
+
+	if (ret)
+		log_warn("standby: cannot allow binding foreign addresses: %s", strerror(-ret));
+	env->write("/proc/sys/net/ipv6/ip_nonlocal_bind", "1");
+}
+
 int standby_enter(const struct standby_env *env, const char *config_path)
 {
-	int ret;
+	int ret, pid;
 
-	ret = env->mkdir(STANDBY_ROOT);
-	if (!ret)
-		ret = env->mount(STANDBY_IMAGE, STANDBY_ROOT, "erofs", MS_RDONLY, NULL);
+	ret = mount_root(env);
 	if (ret) {
 		log_err("standby: cannot mount %s: %s", STANDBY_IMAGE, strerror(-ret));
 		return ret;
 	}
 
-	ret = env->mkdir("/run/kmorph");
-	if (!ret)
-		ret = env->copy(config_path, STANDBY_CONFIG);
+	ret = env->copy(config_path, STANDBY_CONFIG);
 	if (ret) {
 		log_err("standby: cannot copy %s: %s", config_path, strerror(-ret));
 		goto unmount;
@@ -153,12 +205,26 @@ int standby_enter(const struct standby_env *env, const char *config_path)
 		goto unmount;
 	}
 
+	allow_nonlocal_bind(env);
+
+	/* kmorphd goes on probing in the child while the image's init starts its services */
+	pid = env->fork();
+	if (pid < 0) {
+		log_err("standby: cannot fork: %s; kmorphd stays init, without the standby services",
+			strerror(-pid));
+		return 1;
+	}
+	if (!pid)
+		return 0;
 	log_info("standby: running %s from the standby image", STANDBY_INIT);
 	ret = env->exec(STANDBY_INIT);
-	log_err("standby: cannot execute %s: %s", STANDBY_INIT, strerror(-ret));
+	log_err("standby: cannot execute %s: %s; kmorphd goes on without the standby services",
+		STANDBY_INIT, strerror(-ret));
+	env->idle();
 	return ret;
 
 unmount:
 	env->umount(STANDBY_ROOT);
+	env->umount(STANDBY_LAYERS "/image");
 	return ret;
 }

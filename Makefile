@@ -100,7 +100,7 @@ install: all
 	$(INSTALL) -m 0755 dist/dracut/kmorph-mkimage $(DESTDIR)$(LIBDIR)/
 	$(INSTALL) -d $(DESTDIR)$(STANDBYDIR)
 	$(INSTALL) -m 0755 dist/dracut/99kmorph-standby/module-setup.sh dist/standby/kmorph-switch $(DESTDIR)$(STANDBYDIR)/
-	$(INSTALL) -m 0644 dist/standby/*.service dist/standby/*.path dist/standby/*.target dist/standby/*.conf $(DESTDIR)$(STANDBYDIR)/
+	$(INSTALL) -m 0644 dist/standby/*.service dist/standby/*.path dist/standby/*.target $(DESTDIR)$(STANDBYDIR)/
 	$(INSTALL) -m 0644 dist/systemd/kmorph.service $(DESTDIR)$(UNITDIR)/
 	$(INSTALL) -m 0755 dist/networkmanager/kmorph-nm-handback $(DESTDIR)$(LIBDIR)/
 	$(INSTALL) -m 0644 dist/networkmanager/kmorph-nm-handback.service $(DESTDIR)$(UNITDIR)/

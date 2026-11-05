@@ -13,6 +13,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/epoll.h>
+#include <sys/prctl.h>
 #include <sys/signalfd.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -563,9 +564,17 @@ int main(int argc, char **argv)
 	log_open_kmsg();
 	if (ret)
 		log_warn("init: some filesystems did not mount: %s", strerror(-ret));
-	/* Returns only if the image could not become the root; kmorphd then stays init. */
-	if (d.init && access(STANDBY_IMAGE, F_OK) == 0)
-		standby_enter(&standby_default_env, config_path);
+	if (d.init && access(STANDBY_IMAGE, F_OK) == 0) {
+		ret = standby_enter(&standby_default_env, config_path);
+		if (ret >= 0)
+			config_path = STANDBY_CONFIG;
+		if (ret == 0) {
+			/* It runs as the image's /init, which is what ps would call it */
+			prctl(PR_SET_NAME, "kmorphd");
+			d.init = false;
+			foreground = 1;
+		}
+	}
 
 	ret = config_load(config_path, &d.cfg, err, sizeof(err));
 	if (ret == -ENOENT) {
