@@ -1,0 +1,11 @@
+[Unit]
+Description=Let NetworkManager configure the NICs kmorph restored
+ConditionPathExists=/run/kmorph/network-restored
+Before=NetworkManager.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/lib/kmorph/kmorph-nm-handback
+
+[Install]
+WantedBy=NetworkManager.service

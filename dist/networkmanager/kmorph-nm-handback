@@ -1,0 +1,13 @@
+#!/bin/sh
+# NetworkManager leaves an interface it finds configured as an external
+# one and renews no lease for it. The interfaces kmorphd restored are to
+# be configured as on any boot, which keeps their addresses.
+set -e
+match=
+while read -r dev; do
+	match="${match:+$match,}interface-name:$dev"
+done < /run/kmorph/network-restored
+[ -n "$match" ] || exit 0
+mkdir -p /run/NetworkManager/conf.d
+printf '[device-kmorph]\nmatch-device=%s\nkeep-configuration=no\n' "$match" \
+	> /run/NetworkManager/conf.d/90-kmorph.conf
