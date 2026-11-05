@@ -11,9 +11,6 @@
 #include "kmorph/crashinfo.h"
 #include "kmorph/file.h"
 
-/* Start of the kernel text window on x86-64; the direct map lies below it. */
-#define KERNEL_TEXT_BASE 0xffffffff80000000ULL
-
 static int parse_hex(const char *s, char **end, uint64_t *v)
 {
 	if (!*s)
@@ -114,11 +111,28 @@ int crashinfo_read_cpu_notes(const char *cpu_root, struct rangelist *out)
 	return 0;
 }
 
+static bool has_paddr(const Elf64_Phdr *ph)
+{
+	return ph->p_type == PT_LOAD && ph->p_paddr != (Elf64_Addr)-1;
+}
+
+/*
+ * kcore shows the kernel image twice: at its link address, and as part of
+ * RAM in the direct map. So the direct map is the mapping of the RAM the
+ * image sits in, wherever each architecture puts either.
+ */
+static bool maps_image(const Elf64_Phdr *ram, const Elf64_Phdr *image)
+{
+	return image->p_paddr >= ram->p_paddr &&
+	       image->p_paddr + image->p_memsz <= ram->p_paddr + ram->p_memsz &&
+	       image->p_vaddr - image->p_paddr != ram->p_vaddr - ram->p_paddr;
+}
+
 int crashinfo_read_page_offset(const char *kcore_path, uint64_t *out)
 {
 	Elf64_Ehdr eh;
 	Elf64_Phdr *ph;
-	size_t i, len;
+	size_t i, j, len;
 	int fd, ret = -ENOENT;
 
 	fd = open(kcore_path, O_RDONLY | O_CLOEXEC);
@@ -141,13 +155,14 @@ int crashinfo_read_page_offset(const char *kcore_path, uint64_t *out)
 		ret = -EIO;
 		goto out;
 	}
-	for (i = 0; i < eh.e_phnum; i++) {
-		if (ph[i].p_type != PT_LOAD || ph[i].p_paddr == (Elf64_Addr)-1 ||
-		    ph[i].p_vaddr >= KERNEL_TEXT_BASE)
-			continue;
-		*out = ph[i].p_vaddr - ph[i].p_paddr;
-		ret = 0;
-		break;
+	for (i = 0; i < eh.e_phnum && ret; i++) {
+		for (j = 0; j < eh.e_phnum && ret; j++) {
+			if (i == j || !has_paddr(&ph[i]) || !has_paddr(&ph[j]) ||
+			    !maps_image(&ph[i], &ph[j]))
+				continue;
+			*out = ph[i].p_vaddr - ph[i].p_paddr;
+			ret = 0;
+		}
 	}
 out:
 	free(ph);

@@ -45,7 +45,7 @@ static void fill_ehdr(Elf64_Ehdr *eh, size_t phnum)
 	eh->e_ident[EI_VERSION] = EV_CURRENT;
 	eh->e_ident[EI_OSABI] = ELFOSABI_NONE;
 	eh->e_type = ET_CORE;
-	eh->e_machine = EM_X86_64;
+	eh->e_machine = ELFCORE_MACHINE;
 	eh->e_version = EV_CURRENT;
 	eh->e_phoff = sizeof(*eh);
 	eh->e_ehsize = sizeof(*eh);

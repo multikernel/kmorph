@@ -61,7 +61,7 @@ static void layout_places_notes_then_page_aligned_loads(void)
 	CHECK_EQ(memcmp(eh->e_ident, ELFMAG, SELFMAG), 0);
 	CHECK_EQ(eh->e_ident[EI_CLASS], ELFCLASS64);
 	CHECK_EQ(eh->e_type, ET_CORE);
-	CHECK_EQ(eh->e_machine, EM_X86_64);
+	CHECK_EQ(eh->e_machine, ELFCORE_MACHINE);
 	CHECK_EQ(eh->e_phoff, sizeof(*eh));
 	CHECK_EQ(eh->e_phnum, 3);
 	ph = (Elf64_Phdr *)((char *)l.header + eh->e_phoff);

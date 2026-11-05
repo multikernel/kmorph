@@ -109,7 +109,54 @@ static void put_kcore(const char *rel, const Elf64_Phdr *ph, size_t n)
 	free(blob);
 }
 
-static void page_offset_comes_from_the_direct_map_segment(void)
+static void check_page_offset(const char *rel, const Elf64_Phdr *ph, size_t n,
+			      int want_ret, uint64_t want)
+{
+	char path[512];
+	uint64_t off = 0;
+
+	put_kcore(rel, ph, n);
+	snprintf(path, sizeof(path), "%s/%s", dir, rel);
+	CHECK_EQ(crashinfo_read_page_offset(path, &off), want_ret);
+	if (!want_ret)
+		CHECK_EQ(off, want);
+}
+
+static void load(Elf64_Phdr *ph, uint64_t vaddr, uint64_t paddr, uint64_t size)
+{
+	memset(ph, 0, sizeof(*ph));
+	ph->p_type = PT_LOAD;
+	ph->p_vaddr = vaddr;
+	ph->p_paddr = paddr;
+	ph->p_memsz = size;
+}
+
+static void page_offset_on_x86_64(void)
+{
+	Elf64_Phdr ph[4];
+
+	memset(ph, 0, sizeof(ph));
+	ph[0].p_type = PT_NOTE;
+	load(&ph[1], 0xffffffff81000000ULL, 0x1000000, 0x2000000);	/* kernel image */
+	load(&ph[2], 0xffffc90000000000ULL, (Elf64_Addr)-1, 0x1000);	/* vmalloc */
+	load(&ph[3], 0xffff888000100000ULL, 0x100000, 0x7ff00000);	/* direct map */
+	check_page_offset("kcore-x86", ph, 4, 0, 0xffff888000000000ULL);
+}
+
+/* The image sits in the vmalloc area and comes first, the linear map below */
+static void page_offset_on_arm64(void)
+{
+	Elf64_Phdr ph[4];
+
+	memset(ph, 0, sizeof(ph));
+	ph[0].p_type = PT_NOTE;
+	load(&ph[1], 0xffff800080000000ULL, 0x40200000, 0x2000000);	/* kernel image */
+	load(&ph[2], 0xffff800000000000ULL, (Elf64_Addr)-1, 0x8000000);	/* modules */
+	load(&ph[3], 0xfff0000000000000ULL, 0x40000000, 0x100000000ULL);	/* linear map */
+	check_page_offset("kcore-arm64", ph, 4, 0, 0xfff0000000000000ULL - 0x40000000);
+}
+
+static void page_offset_needs_the_image_in_ram(void)
 {
 	char path[512];
 	Elf64_Phdr ph[4];
@@ -117,27 +164,13 @@ static void page_offset_comes_from_the_direct_map_segment(void)
 
 	memset(ph, 0, sizeof(ph));
 	ph[0].p_type = PT_NOTE;
-	ph[1].p_type = PT_LOAD;			/* kernel text: above the text window */
-	ph[1].p_vaddr = 0xffffffff81000000ULL;
-	ph[1].p_paddr = 0x1000000;
-	ph[2].p_type = PT_LOAD;			/* vmalloc: no physical address */
-	ph[2].p_vaddr = 0xffffc90000000000ULL;
-	ph[2].p_paddr = (Elf64_Addr)-1;
-	ph[3].p_type = PT_LOAD;			/* direct map */
-	ph[3].p_vaddr = 0xffff888000100000ULL;
-	ph[3].p_paddr = 0x100000;
-	put_kcore("kcore", ph, 4);
-	snprintf(path, sizeof(path), "%s/kcore", dir);
-	CHECK_EQ(crashinfo_read_page_offset(path, &off), 0);
-	CHECK_EQ(off, 0xffff888000000000ULL);
-
-	put_kcore("kcore-nodm", ph, 3);
-	snprintf(path, sizeof(path), "%s/kcore-nodm", dir);
-	CHECK_EQ(crashinfo_read_page_offset(path, &off), -ENOENT);
-
-	put_kcore("kcore-empty", ph, 0);
-	snprintf(path, sizeof(path), "%s/kcore-empty", dir);
-	CHECK_EQ(crashinfo_read_page_offset(path, &off), -ENOENT);
+	load(&ph[1], 0xffffffff81000000ULL, 0x1000000, 0x2000000);
+	load(&ph[2], 0xffffc90000000000ULL, (Elf64_Addr)-1, 0x1000);
+	/* RAM that does not hold the image */
+	load(&ph[3], 0xffff888100000000ULL, 0x100000000ULL, 0x40000000);
+	check_page_offset("kcore-noimage", ph, 4, -ENOENT, 0);
+	check_page_offset("kcore-nodm", ph, 3, -ENOENT, 0);
+	check_page_offset("kcore-empty", ph, 0, -ENOENT, 0);
 
 	put("notelf", "hello");
 	snprintf(path, sizeof(path), "%s/notelf", dir);
@@ -170,6 +203,8 @@ TEST_MAIN({
 	RUN(reads_vmcoreinfo_address_and_size);
 	RUN(reads_crash_notes_in_cpu_order);
 	RUN(cpus_without_notes_are_enoent);
-	RUN(page_offset_comes_from_the_direct_map_segment);
+	RUN(page_offset_on_x86_64);
+	RUN(page_offset_on_arm64);
+	RUN(page_offset_needs_the_image_in_ram);
 	RUN(presence_and_free);
 })

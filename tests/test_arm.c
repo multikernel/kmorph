@@ -401,22 +401,27 @@ static void put_cpu_note(int n, const char *addr)
 
 static void put_kcore_with_direct_map(void)
 {
-	unsigned char blob[sizeof(Elf64_Ehdr) + sizeof(Elf64_Phdr)];
+	unsigned char blob[sizeof(Elf64_Ehdr) + 2 * sizeof(Elf64_Phdr)];
 	Elf64_Ehdr eh;
-	Elf64_Phdr ph;
+	Elf64_Phdr ph[2];
 
 	memset(&eh, 0, sizeof(eh));
-	memset(&ph, 0, sizeof(ph));
+	memset(ph, 0, sizeof(ph));
 	memcpy(eh.e_ident, ELFMAG, SELFMAG);
 	eh.e_ident[EI_CLASS] = ELFCLASS64;
 	eh.e_phoff = sizeof(eh);
-	eh.e_phentsize = sizeof(ph);
-	eh.e_phnum = 1;
-	ph.p_type = PT_LOAD;
-	ph.p_vaddr = 0xffff888000100000ULL;
-	ph.p_paddr = 0x100000;
+	eh.e_phentsize = sizeof(ph[0]);
+	eh.e_phnum = 2;
+	ph[0].p_type = PT_LOAD;			/* kernel image */
+	ph[0].p_vaddr = 0xffffffff81000000ULL;
+	ph[0].p_paddr = 0x1000000;
+	ph[0].p_memsz = 0x2000000;
+	ph[1].p_type = PT_LOAD;			/* direct map */
+	ph[1].p_vaddr = 0xffff888000100000ULL;
+	ph[1].p_paddr = 0x100000;
+	ph[1].p_memsz = 0x7ff00000;
 	memcpy(blob, &eh, sizeof(eh));
-	memcpy(blob + sizeof(eh), &ph, sizeof(ph));
+	memcpy(blob + sizeof(eh), ph, sizeof(ph));
 	put("kcore", blob, sizeof(blob));
 }
 

@@ -16,6 +16,13 @@
 #define ELFCORE_PAGE 4096ULL
 #define ELFCORE_NO_VADDR ((uint64_t)-1)
 
+/* The predecessor ran on this machine, so it is what kmorph is built for */
+#if defined(__aarch64__)
+#define ELFCORE_MACHINE EM_AARCH64
+#else
+#define ELFCORE_MACHINE EM_X86_64
+#endif
+
 struct elfcore_note {
 	const void *data;	/* note records as the kernel wrote them */
 	size_t len;
