@@ -21,6 +21,8 @@ struct kmorph_config {
 	struct strlist devices;	/* PCI ids handed to the successor */
 	struct cpulist machine_cpus;	/* every CPU on the machine; empty: read the MADT */
 	struct strlist modules;	/* kernel modules the image builders add; unused by kmorph itself */
+	struct strlist standby;	/* units the successor runs before the takeover */
+	struct strlist standby_files;	/* extra paths the standby image builder copies */
 
 	/* Detection (successor side) */
 	uint64_t probe_interval_ms;

@@ -169,6 +169,23 @@ static void modules_is_a_list_for_the_image_builders(void)
 	config_free(&c);
 }
 
+static void standby_lists_units_and_files(void)
+{
+	struct kmorph_config c;
+	char err[128];
+
+	CHECK_EQ(config_parse("", &c, err, sizeof(err)), 0);
+	CHECK_EQ(c.standby.count, 0);
+	config_free(&c);
+	CHECK_EQ(config_parse("standby = nginx.service, haproxy.service\n"
+			      "standby_files = /usr/lib64/nginx/modules\n", &c, err, sizeof(err)), 0);
+	CHECK_EQ(c.standby.count, 2);
+	CHECK_STREQ(c.standby.items[1], "haproxy.service");
+	CHECK_EQ(c.standby_files.count, 1);
+	CHECK_STREQ(c.standby_files.items[0], "/usr/lib64/nginx/modules");
+	config_free(&c);
+}
+
 static void reset_devices_defaults_to_yes(void)
 {
 	struct kmorph_config c;
@@ -195,5 +212,6 @@ TEST_MAIN({
 	RUN(parsed_text_is_kept_verbatim);
 	RUN(console_needs_a_login_program);
 	RUN(modules_is_a_list_for_the_image_builders);
+	RUN(standby_lists_units_and_files);
 	RUN(reset_devices_defaults_to_yes);
 })
