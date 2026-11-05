@@ -101,7 +101,7 @@ int mkfs_read_root_tree(const struct mkfs *fs, void **dtb, size_t *len)
 
 int mkfs_instance_id(const struct mkfs *fs, const char *name, uint32_t *id)
 {
-	char path[PATH_MAX], rel[256];
+	char path[PATH_MAX], rel[NAME_MAX + 32];
 
 	snprintf(rel, sizeof(rel), "instances/%s/id", name);
 	mkfs_path(fs, path, sizeof(path), rel);
@@ -110,7 +110,7 @@ int mkfs_instance_id(const struct mkfs *fs, const char *name, uint32_t *id)
 
 int mkfs_instance_status(const struct mkfs *fs, const char *name, char *buf, size_t len)
 {
-	char path[PATH_MAX], rel[256];
+	char path[PATH_MAX], rel[NAME_MAX + 32];
 	char *status;
 	int ret;
 
@@ -122,4 +122,30 @@ int mkfs_instance_status(const struct mkfs *fs, const char *name, char *buf, siz
 	snprintf(buf, len, "%s", status);
 	free(status);
 	return 0;
+}
+
+/* Instance 0 is this kernel's record of its own host, not a kernel it runs. */
+int mkfs_other_running(const struct mkfs *fs, const char *name, char *other, size_t len)
+{
+	char path[PATH_MAX], status[32];
+	struct dirent *e;
+	uint32_t id;
+	DIR *dir;
+	int found = 0;
+
+	mkfs_path(fs, path, sizeof(path), "instances");
+	dir = opendir(path);
+	if (!dir)
+		return -errno;
+	while (!found && (e = readdir(dir))) {
+		if (e->d_name[0] == '.' || !strcmp(e->d_name, name) ||
+		    mkfs_instance_id(fs, e->d_name, &id) || !id ||
+		    mkfs_instance_status(fs, e->d_name, status, sizeof(status)) ||
+		    strcmp(status, "active"))
+			continue;
+		snprintf(other, len, "%s", e->d_name);
+		found = 1;
+	}
+	closedir(dir);
+	return found;
 }

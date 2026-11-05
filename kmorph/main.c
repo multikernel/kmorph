@@ -1,6 +1,6 @@
 /*
  * kmorph: the operator's command on the predecessor. Arms a successor,
- * disarms it, or reports its state.
+ * disarms it, reports its state, or hands the machine over to it.
  */
 #include <errno.h>
 #include <getopt.h>
@@ -8,54 +8,25 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/socket.h>
-#include <sys/time.h>
 #include <unistd.h>
 
 #include "kmorph/config.h"
 #include "kmorph/log.h"
 #include "kmorph/mkfs.h"
 #include "kmorph/request.h"
-#include "kmorph/vsock.h"
 #include "arm.h"
+#include "client.h"
 #include "image.h"
+#include "upgrade.h"
 
 #define STATUS_TIMEOUT_MS 2000
 
 static int ask_daemon(unsigned int cid, struct status_reply *reply)
 {
-	struct sockaddr_vsock addr;
-	struct timeval tv = { .tv_sec = STATUS_TIMEOUT_MS / 1000,
-			      .tv_usec = (STATUS_TIMEOUT_MS % 1000) * 1000 };
 	char line[128];
-	ssize_t n;
-	int fd, ret = 0;
+	int ret = client_request(cid, "status\n", STATUS_TIMEOUT_MS, line, sizeof(line));
 
-	fd = vsock_multikernel_socket(0);
-	if (fd < 0)
-		return fd;
-	setsockopt(fd, AF_VSOCK, VSOCK_SO_CONNECT_TIMEOUT_OLD, &tv, sizeof(tv));
-	setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
-
-	memset(&addr, 0, sizeof(addr));
-	addr.svm_family = AF_VSOCK;
-	addr.svm_cid = cid;
-	addr.svm_port = KMORPH_VSOCK_PORT;
-	if (connect(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0 ||
-	    send(fd, "status\n", 7, MSG_NOSIGNAL) < 0) {
-		ret = -errno;
-		goto out;
-	}
-	n = recv(fd, line, sizeof(line) - 1, 0);
-	if (n <= 0) {
-		ret = n ? -errno : -ECONNRESET;
-		goto out;
-	}
-	line[n] = '\0';
-	ret = request_parse_status(line, reply);
-out:
-	close(fd);
-	return ret;
+	return ret ? ret : request_parse_status(line, reply);
 }
 
 static int status_run(const struct kmorph_config *cfg, const struct mkfs *fs)
@@ -127,7 +98,7 @@ static int init_run(const struct kmorph_config *cfg)
 
 static void usage(void)
 {
-	fprintf(stderr, "usage: kmorph <init|arm|disarm|status> [--config PATH]\n");
+	fprintf(stderr, "usage: kmorph <init|arm|disarm|status|upgrade> [--config PATH]\n");
 	exit(2);
 }
 
@@ -173,10 +144,9 @@ int main(int argc, char **argv)
 		ret = disarm_run(&cfg, &fs, &arm_default_hooks);
 	else if (!strcmp(verb, "status"))
 		ret = status_run(&cfg, &fs);
-	else if (!strcmp(verb, "upgrade")) {
-		log_err("planned takeover is not implemented yet");
-		ret = -ENOSYS;
-	} else
+	else if (!strcmp(verb, "upgrade"))
+		ret = upgrade_run(&cfg, &fs);
+	else
 		usage();
 
 	config_free(&cfg);

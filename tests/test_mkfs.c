@@ -96,6 +96,29 @@ static void instance_id_and_status_are_read(void)
 	CHECK_EQ(mkfs_instance_id(&fs, "nope", &id), -ENOENT);
 }
 
+static void only_other_running_kernels_count(void)
+{
+	char other[64];
+
+	put("instances/web/status", "ready\n");
+	mkdir_rel("instances/host");
+	put("instances/host/id", "0\n");
+	put("instances/host/status", "active\n");
+	mkdir_rel("instances/successor");
+	put("instances/successor/id", "1\n");
+	put("instances/successor/status", "active\n");
+	mkdir_rel("instances/spare");
+	put("instances/spare/id", "4\n");
+	put("instances/spare/status", "ready\n");
+	CHECK_EQ(mkfs_other_running(&fs, "successor", other, sizeof(other)), 0);
+
+	mkdir_rel("instances/db");
+	put("instances/db/id", "2\n");
+	put("instances/db/status", "active\n");
+	CHECK_EQ(mkfs_other_running(&fs, "successor", other, sizeof(other)), 1);
+	CHECK_STREQ(other, "db");
+}
+
 static void mount_is_a_noop_when_the_tree_is_present(void)
 {
 	struct mkfs none = { "/nonexistent/multikernel" };
@@ -117,4 +140,5 @@ TEST_MAIN({
 	RUN(apply_overlay_without_interface_is_enoent);
 	RUN(baseline_write_lands_in_device_tree);
 	RUN(instance_id_and_status_are_read);
+	RUN(only_other_running_kernels_count);
 })

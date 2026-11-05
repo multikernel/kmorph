@@ -25,5 +25,7 @@ int mkfs_write_baseline(const struct mkfs *fs, const void *dtb, size_t len);
 int mkfs_read_root_tree(const struct mkfs *fs, void **dtb, size_t *len);
 int mkfs_instance_id(const struct mkfs *fs, const char *name, uint32_t *id);
 int mkfs_instance_status(const struct mkfs *fs, const char *name, char *buf, size_t len);
+/* 1 with @other set when a kernel besides @name runs under this one, else 0 */
+int mkfs_other_running(const struct mkfs *fs, const char *name, char *other, size_t len);
 
 #endif
