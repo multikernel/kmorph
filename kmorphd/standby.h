@@ -9,6 +9,7 @@
 #define STANDBY_ROOT	"/standby"
 #define STANDBY_INIT	"/usr/lib/systemd/systemd"
 #define STANDBY_CONFIG	"/run/kmorph/kmorph.conf"
+#define STANDBY_NETWORK	"/run/kmorph/network"
 
 struct standby_env {
 	int (*mount)(const char *src, const char *target, const char *type,

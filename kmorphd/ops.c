@@ -316,6 +316,26 @@ out:
 	return first;
 }
 
+static void restore_network(struct ops *o)
+{
+	const struct netsnap *s = o->env.network;
+	bool restored[NETSNAP_MAX_LINKS];
+	char list[NETSNAP_MAX_LINKS * 17] = "";
+	size_t i;
+
+	if (netsnap_apply(o->env.net_env, s, restored) <= 0 || !o->env.net_restored_path)
+		return;
+	for (i = 0; i < s->count; i++) {
+		if (!restored[i])
+			continue;
+		strcat(list, s->links[i].name);
+		strcat(list, "\n");
+	}
+	if (file_write(o->env.net_restored_path, list, strlen(list)))
+		log_warn("network: cannot record the restored interfaces in %s",
+			 o->env.net_restored_path);
+}
+
 /*
  * Devices come first, so that whatever DMA the predecessor left running
  * is stopped before its memory is hot-added. With a dump configured the
@@ -330,6 +350,9 @@ int ops_adopt(struct ops *o)
 	if (!o->devices_tried) {
 		o->devices_tried = true;
 		ops_adopt_devices(o);
+		/* The machine answers on its addresses again before its memory is even adopted. */
+		if (o->env.network && o->env.net_env)
+			restore_network(o);
 	}
 	ret = plan_adoption(o);
 	if (ret)

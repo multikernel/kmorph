@@ -9,6 +9,7 @@
 #include "takeover.h"
 
 #include "kmorph/memblock.h"
+#include "kmorph/netsnap.h"
 
 /*
  * The takeover operations bound to the kernel interfaces. Every path the
@@ -25,6 +26,9 @@ struct ops_env {
 	const char *pci_bus;		/* the PCI bus in sysfs */
 	bool reset_devices;		/* reset each adopted device before its driver binds */
 	int (*fence_fn)(int mk_id);
+	const struct netsnap *network;	/* identity of the NICs to adopt; NULL: none */
+	const struct netsnap_env *net_env;
+	const char *net_restored_path;	/* lists the interfaces put back, for the network manager */
 };
 
 struct ops {

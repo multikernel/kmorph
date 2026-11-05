@@ -8,6 +8,7 @@
 
 #include "kmorph/file.h"
 #include "kmorph/log.h"
+#include "kmorph/netsnap.h"
 #include "standby.h"
 
 static const char *const pseudo_fs[] = { "/proc", "/sys", "/dev", "/run" };
@@ -137,6 +138,10 @@ int standby_enter(const struct standby_env *env, const char *config_path)
 		log_err("standby: cannot copy %s: %s", config_path, strerror(-ret));
 		goto unmount;
 	}
+	/* Only the predecessor's arm hands over a network identity; an image may carry none. */
+	ret = env->copy(NETSNAP_PATH, STANDBY_NETWORK);
+	if (ret && ret != -ENOENT)
+		log_warn("standby: cannot copy %s: %s", NETSNAP_PATH, strerror(-ret));
 
 	ret = move_pseudo_fs(env);
 	if (ret)

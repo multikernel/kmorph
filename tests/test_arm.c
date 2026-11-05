@@ -1018,6 +1018,35 @@ static void a_source_newer_than_the_image_is_reported(void)
 	unlink(manifest);
 }
 
+static char snapshot_skipped[32];
+
+static int fake_net_snapshot(const struct strlist *skip, char **text)
+{
+	snprintf(snapshot_skipped, sizeof(snapshot_skipped), "%s", skip->count ? skip->items[0] : "");
+	*text = strdup("link 0000:01:00.0 enp1s0 52:54:00:12:34:56 1500\n");
+	return 1;
+}
+
+static void arm_hands_the_network_identity_to_the_successor(void)
+{
+	struct arm_hooks h = hooks;
+	struct mkfs fs = { sysfs };
+	struct cpio_entry e;
+	char err[64];
+
+	setup();
+	config_free(&cfg);
+	config_parse("name = successor\ncpus = 12-15\nmemory = 4GB\n"
+		     "kernel = /boot/vmlinuz\ndevices = 0000:00:1f.6\n", &cfg, err, sizeof(err));
+	put_pci_device("0000:00:1f.6", "0x8086", "0x15b8");
+	h.net_snapshot = fake_net_snapshot;
+	CHECK_EQ(arm_run(&cfg, &fs, &h), 0);
+	CHECK_STREQ(snapshot_skipped, "0000:00:1f.6");
+	CHECK_EQ(appended_entry("etc/kmorph/network", &e), 1);
+	CHECK(e.len && !memcmp(e.data, "link 0000:01:00.0 enp1s0", 24));
+	config_free(&cfg);
+}
+
 TEST_MAIN({
 	if (!mkdtemp(sysfs)) {
 		perror("mkdtemp");
@@ -1068,4 +1097,5 @@ TEST_MAIN({
 	RUN(disarm_of_a_bare_instance_only_removes_it);
 	RUN(disarm_halts_then_removes_the_instance);
 	RUN(a_source_newer_than_the_image_is_reported);
+	RUN(arm_hands_the_network_identity_to_the_successor);
 })

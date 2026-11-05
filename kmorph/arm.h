@@ -27,6 +27,8 @@ struct arm_hooks {
 	const char *usb_root;		/* /sys/bus/usb/devices, for usbN names */
 	const char *own_host_tree;	/* the host tree this kernel booted with, if a spawn */
 	const char *dt_cpus;		/* the firmware tree's /cpus, without ACPI */
+	/* The network identity of the NICs but those in skip, as text; NULL: none is handed over. */
+	int (*net_snapshot)(const struct strlist *skip, char **text);
 };
 
 extern const struct arm_hooks arm_default_hooks;

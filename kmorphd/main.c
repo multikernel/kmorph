@@ -24,9 +24,11 @@
 #include "kmorph/devtree.h"
 #include "kmorph/dump.h"
 #include "kmorph/iomem.h"
+#include "kmorph/file.h"
 #include "kmorph/log.h"
 #include "kmorph/mkfs.h"
 #include "kmorph/mksys.h"
+#include "kmorph/netsnap.h"
 #include "kmorph/pci.h"
 #include "kmorph/probe.h"
 #include "kmorph/request.h"
@@ -310,6 +312,30 @@ static int open_signals(bool init)
 	return signalfd(-1, &mask, SFD_CLOEXEC);
 }
 
+/* The standby root keeps the forwarded identity in /run, the image's own in /etc. */
+static const struct netsnap *load_network(void)
+{
+	static const char *const paths[] = { STANDBY_NETWORK, NETSNAP_PATH };
+	static struct netsnap snap;
+	char *text;
+	size_t i;
+	int ret;
+
+	for (i = 0; i < sizeof(paths) / sizeof(paths[0]); i++) {
+		if (file_read_string(paths[i], &text))
+			continue;
+		ret = netsnap_parse(text, &snap);
+		free(text);
+		if (ret) {
+			log_warn("network: %s is malformed; the NICs wait for the disk's config",
+				 paths[i]);
+			return NULL;
+		}
+		return snap.count ? &snap : NULL;
+	}
+	return NULL;
+}
+
 static int daemon_setup(struct daemon *d)
 {
 	static struct takeover_ops tk_ops;
@@ -323,6 +349,9 @@ static int daemon_setup(struct daemon *d)
 		.pci_bus = PCI_BUS_ROOT,
 		.reset_devices = d->cfg.reset_devices,
 		.fence_fn = mksys_fence,
+		.network = load_network(),
+		.net_env = &netsnap_default_env,
+		.net_restored_path = STATE_DIR "/network-restored",
 	};
 	int ret;
 

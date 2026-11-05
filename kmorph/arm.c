@@ -21,8 +21,24 @@
 #include "kmorph/iomem.h"
 #include "kmorph/madt.h"
 #include "kmorph/memblock.h"
+#include "kmorph/netsnap.h"
 #include "kmorph/vmlinux.h"
 #include "arm.h"
+
+static int net_snapshot(const struct strlist *skip, char **text)
+{
+	static struct netsnap snap;
+	char buf[16384];
+	int ret;
+
+	ret = netsnap_collect("/sys/class/net", skip, &snap);
+	if (!ret)
+		ret = netsnap_format(&snap, buf, sizeof(buf));
+	if (ret < 0)
+		return ret;
+	*text = strdup(buf);
+	return *text ? (int)snap.count : -ENOMEM;
+}
 
 const struct arm_hooks arm_default_hooks = {
 	.open_kernel = vmlinux_open,
@@ -42,6 +58,7 @@ const struct arm_hooks arm_default_hooks = {
 	.usb_root = DEVNAME_USB_ROOT,
 	.own_host_tree = HOST_TREE_DIR,
 	.dt_cpus = DEVTREE_CPUS,
+	.net_snapshot = net_snapshot,
 };
 
 static bool strlist_has(const struct strlist *l, const char *s)
@@ -413,6 +430,30 @@ bool arm_memory_fits(uint64_t memory, size_t image_len)
 	return memory / 3 >= image_len;
 }
 
+/*
+ * The successor gives the NICs it adopts the addresses and routes they
+ * have now; a NIC it owns from boot is not the predecessor's to describe.
+ */
+static int add_network(const struct kmorph_config *cfg, const struct arm_hooks *h,
+		       struct cpio *extra)
+{
+	char *text = NULL;
+	int ret;
+
+	if (!h->net_snapshot)
+		return 0;
+	ret = h->net_snapshot(&cfg->devices, &text);
+	if (ret < 0) {
+		log_warn("no network identity for the successor: %s", strerror(-ret));
+		return 0;
+	}
+	if (ret > 0)
+		log_info("network identity of %d interfaces handed to the successor", ret);
+	ret = cpio_add_file(extra, NETSNAP_PATH, text, strlen(text), 0644);
+	free(text);
+	return ret;
+}
+
 int arm_stale_source(const char *image, char *out, size_t len)
 {
 	char manifest[PATH_MAX], *list, *line, *save;
@@ -461,6 +502,8 @@ static int successor_initrd(const struct kmorph_config *cfg, const struct arm_ho
 		log_warn("memory = %llu MB may not hold the %zu MB image once unpacked",
 			 (unsigned long long)cfg->memory >> 20, len >> 20);
 	ret = cpio_add_file(&extra, KMORPH_CONFIG_PATH, cfg->text, strlen(cfg->text), 0644);
+	if (!ret)
+		ret = add_network(cfg, h, &extra);
 	if (!ret)
 		ret = cpio_finish(&extra);
 	if (ret)

@@ -54,6 +54,7 @@ static void the_image_becomes_the_root_before_its_init_runs(void)
 	CHECK_STREQ(trace,
 		    "mkdir /standby;mount /standby.erofs /standby;"
 		    "mkdir /run/kmorph;copy /etc/kmorph/kmorph.conf /run/kmorph/kmorph.conf;"
+		    "copy /etc/kmorph/network /run/kmorph/network;"
 		    "move /proc /standby/proc;move /sys /standby/sys;"
 		    "move /dev /standby/dev;move /run /standby/run;"
 		    "chdir /standby;move . /;chroot .;chdir /;"
@@ -73,6 +74,13 @@ static void a_missing_config_unmounts_the_image(void)
 	CHECK_EQ(standby_enter(&env, "/etc/kmorph/kmorph.conf"), -ENOENT);
 	CHECK(strstr(trace, "copy /etc/kmorph/kmorph.conf /run/kmorph/kmorph.conf;umount /standby;"));
 	CHECK(!strstr(trace, "move"));
+}
+
+static void an_image_without_a_network_identity_still_switches(void)
+{
+	run("copy /etc/kmorph/network /run/kmorph/network;", -ENOENT);
+	CHECK_EQ(standby_enter(&env, "/etc/kmorph/kmorph.conf"), -ENOENT);
+	CHECK(strstr(trace, "exec /usr/lib/systemd/systemd;"));
 }
 
 static void a_failed_move_puts_back_what_was_moved(void)
@@ -102,6 +110,7 @@ TEST_MAIN({
 	RUN(the_image_becomes_the_root_before_its_init_runs);
 	RUN(an_image_that_does_not_mount_changes_nothing);
 	RUN(a_missing_config_unmounts_the_image);
+	RUN(an_image_without_a_network_identity_still_switches);
 	RUN(a_failed_move_puts_back_what_was_moved);
 	RUN(a_root_that_cannot_move_puts_every_filesystem_back);
 })
