@@ -105,8 +105,9 @@ The package route is the one kdump uses. `make install PREFIX=/usr`
 places, from `dist/`, a dracut module and an initramfs-tools hook, a
 helper that runs whichever of dracut or mkinitramfs the host has to
 write `/var/lib/kmorph/successor.img` with kmorphd inside, a
-`kmorph.service` that builds the image if it is missing, arms at boot
-and disarms on stop, and a kernel hook, for kernel-install and for
+`kmorph.service` that builds the image if it is missing, arms at boot,
+keeps the successor's network identity current while armed and disarms
+on stop, and a kernel hook, for kernel-install and for
 Debian's `postinst.d`, that rebuilds the image for the kernel just
 installed and points the `kernel` and `cmdline` keys at it.
 
@@ -123,11 +124,10 @@ console = ttyS0
 console_login = /bin/sh
 ```
 
-and enables the services, the second to keep the successor's copy of
-the [network identity](#network-identity) current:
+and enables the service:
 
 ```
-systemctl enable --now kmorph kmorph-watch
+systemctl enable --now kmorph
 ```
 
 `memory` must hold an unpacked distro initramfs; `kmorph arm` warns when
@@ -200,9 +200,10 @@ ran out in between is not restored.
 
 A crash leaves no time to send the record, so it has to be in the
 successor beforehand and current. `kmorph arm` forwards it beside the
-config, and `kmorph-watch.service` (`kmorph watch`) listens to rtnetlink
-on the predecessor and sends it again to kmorphd whenever an interface,
-address or route changes, a DHCP renewal included. `kmorph upgrade`
+config, and `kmorph watch`, which `kmorph.service` keeps running once
+it armed, listens to rtnetlink on the predecessor and sends it again to
+kmorphd whenever an interface, address or route changes, a DHCP renewal
+included. Without the service, run `kmorph watch` after `kmorph arm`. `kmorph upgrade`
 sends it once more right before the handover.
 
 The network manager on the disk then starts with the interfaces

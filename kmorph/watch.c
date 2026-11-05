@@ -14,6 +14,7 @@
 
 #define REQUEST_TIMEOUT_MS	2000
 #define RETRY_MS		1000
+#define REARM_CHECK_MS		10000
 #define SETTLE_MS		100
 #define SETTLE_MAX_MS		1000
 #define GROUPS (RTMGRP_LINK | RTMGRP_IPV4_IFADDR | RTMGRP_IPV4_ROUTE | \
@@ -70,40 +71,55 @@ static void wait_change(int fd, int timeout_ms)
 	}
 }
 
+/* The watcher must not exit over a passing error: its service would disarm with it. */
+static int open_events(void)
+{
+	bool told = false;
+
+	for (;;) {
+		int fd = rtnl_open_groups(GROUPS);
+
+		if (fd >= 0)
+			return fd;
+		if (!told)
+			log_warn("watch: cannot listen to rtnetlink: %s; retrying", strerror(-fd));
+		told = true;
+		sleep(1);
+	}
+}
+
 int watch_run(const struct kmorph_config *cfg, const struct mkfs *fs)
 {
 	static char sent[NETSNAP_TEXT_MAX], now[NETSNAP_TEXT_MAX];
-	bool synced = false;
-	int fd, ret, err, last_err = 0;
-	uint32_t id;
+	int fd, ret, last_err = 0;
+	uint32_t id, sent_to = 0;
 
 	if (mkfs_instance_id(fs, cfg->name, &id)) {
 		log_err("watch: %s is not armed", cfg->name);
 		return -ENOENT;
 	}
 	/* Subscribed before the first snapshot, so that no change slips in between */
-	fd = rtnl_open_groups(GROUPS);
-	if (fd < 0) {
-		log_err("watch: cannot listen to rtnetlink: %s", strerror(-fd));
-		return fd;
-	}
+	fd = open_events();
 	log_info("watch: handing network changes to %s", cfg->name);
 	for (;;) {
 		ret = netsnap_text(&cfg->devices, now, sizeof(now));
-		if (ret < 0) {
-			log_warn("watch: cannot read the network identity: %s", strerror(-ret));
-		} else if (!synced || strcmp(now, sent)) {
-			err = send_text(id, now);
-			synced = !err;
-			if (synced) {
+		/* A re-armed successor has a new id and only the identity of its arm time */
+		if (ret >= 0 && mkfs_instance_id(fs, cfg->name, &id))
+			ret = -ENOENT;
+		if (ret >= 0 && (id != sent_to || strcmp(now, sent))) {
+			int links = ret;
+
+			ret = send_text(id, now);
+			if (!ret) {
 				memcpy(sent, now, sizeof(sent));
-				log_info("watch: network identity of %d interfaces sent", ret);
-			} else if (err != last_err) {
-				/* kmorphd may still be starting; this repeats every second until it answers */
-				log_warn("watch: cannot send the network identity: %s", strerror(-err));
+				sent_to = id;
+				log_info("watch: network identity of %d interfaces sent", links);
 			}
-			last_err = err;
 		}
-		wait_change(fd, synced && ret >= 0 ? -1 : RETRY_MS);
+		if (ret < 0 && ret != last_err)
+			/* kmorphd may still be starting; this repeats every second until it answers */
+			log_warn("watch: cannot hand the network identity over: %s", strerror(-ret));
+		last_err = ret < 0 ? ret : 0;
+		wait_change(fd, ret < 0 ? RETRY_MS : REARM_CHECK_MS);
 	}
 }

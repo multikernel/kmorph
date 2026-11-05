@@ -1,13 +1,12 @@
 [Unit]
-Description=Arm a kmorph successor kernel
+Description=Arm a kmorph successor kernel and keep its network identity current
 After=local-fs.target
 ConditionPathExists=/etc/kmorph/kmorph.conf
 
 [Service]
-Type=oneshot
-RemainAfterExit=yes
 ExecStartPre=/usr/lib/kmorph/kmorph-mkimage --if-stale
-ExecStart=/usr/bin/kmorph arm
+ExecStartPre=/usr/bin/kmorph arm
+ExecStart=/usr/bin/kmorph watch
 ExecStop=/usr/bin/kmorph disarm
 
 [Install]
