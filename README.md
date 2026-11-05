@@ -161,12 +161,14 @@ point, so a standby service must start without either: it binds its
 ports, the machine's addresses included through `ip_nonlocal_bind`,
 and writes only to a `/var` and `/tmp` in memory.
 
-After the takeover, kmorphd starts `kmorph-switch.service`, which
-mounts the root named by `root=` on the successor's command line, moves
-every process onto it with `pivot_root`, re-executes systemd from the
-disk and starts `default.target`. The disk's own units bring the
-network and the rest of the machine up; the standby services were never
-stopped, and they are reloaded so they reopen their logs on the disk.
+Once the takeover is done, kmorphd creates `/run/kmorph/taken-over`,
+in any image, for whatever runs next to wait for. In the standby image
+a path unit starts `kmorph-switch.service` on it, which mounts the root
+named by `root=` on the successor's command line, moves every process
+onto it with `pivot_root`, re-executes systemd from the disk and starts
+`default.target`. The disk's own units bring the rest of the machine
+up; the standby services were never stopped, and they are reloaded so
+they reopen their logs on the disk.
 
 A standby service must neither write state that has to persist nor
 reach the network before the takeover: kmorph cannot check that, and
@@ -181,6 +183,28 @@ The image is a snapshot: `kmorph-mkimage` records the files it copied
 in `successor.img.files`, `kmorph.service` rebuilds the image when one
 of them changes, and `kmorph arm` warns about a stale image.
 `memory` must hold the image and what the standby services use.
+
+## Network identity
+
+The machine is reachable again only once the adopted NICs have their
+addresses back, and waiting for the disk's network manager to start,
+and for DHCP, takes seconds. `kmorph arm` therefore records the name,
+MAC, MTU, addresses and routes of every PCI network interface it does
+not hand to the successor, and forwards them beside the config. Right
+after adopting the devices, before it even adopts the memory, kmorphd
+puts them back on the same PCI functions over rtnetlink, without
+duplicate address detection: the addresses were the machine's a moment
+ago. The MAC does not change, so neighbours need no gratuitous ARP.
+
+The record is taken at arm time; an address the predecessor gains
+later is not in it, and comes back only with the network manager.
+NetworkManager finds the interfaces configured and leaves them be as
+external ones, which also means it renews no DHCP lease on them, so
+`kmorph-network.service` hands the interfaces kmorphd restored, listed
+in `/run/kmorph/network-restored`, back to it with `nmcli device
+connect`, which keeps their addresses. Enable it on a NetworkManager
+host. A physical NIC still renegotiates its link after the reset that
+`reset_devices` gives it, which can take a second or more.
 
 ## Configuration
 
