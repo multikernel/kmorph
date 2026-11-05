@@ -34,6 +34,7 @@
 #include "console.h"
 #include "init.h"
 #include "ops.h"
+#include "standby.h"
 #include "takeover.h"
 
 #define container_of(ptr, type, member) \
@@ -102,8 +103,17 @@ static void on_state(struct takeover *t, enum takeover_state state)
 
 	log_info("state %s", takeover_state_name(state));
 	write_state_file(d);
-	if (state == TK_TAKEN_OVER && d->cfg.console)
+	if (state != TK_TAKEN_OVER)
+		return;
+	if (d->cfg.console)
 		console_start(d->cfg.console, d->cfg.console_baud, d->cfg.console_login);
+	if (d->cfg.standby.count && !d->init) {
+		int ret = standby_switch();
+
+		if (ret)
+			log_err("standby: cannot start %s: %s; run it by hand",
+				STANDBY_SWITCH_UNIT, strerror(-ret));
+	}
 }
 
 static void deliver_probe(struct daemon *d, int err)
@@ -452,6 +462,9 @@ int main(int argc, char **argv)
 	log_open_kmsg();
 	if (ret)
 		log_warn("init: some filesystems did not mount: %s", strerror(-ret));
+	/* Returns only if the image could not become the root; kmorphd then stays init. */
+	if (d.init && access(STANDBY_IMAGE, F_OK) == 0)
+		standby_enter(&standby_default_env, config_path);
 
 	ret = config_load(config_path, &d.cfg, err, sizeof(err));
 	if (ret == -ENOENT) {
