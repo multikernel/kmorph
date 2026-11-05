@@ -83,5 +83,13 @@ for unit in $units; do
 	fi
 done
 
+# The standby root reached local-fs.target and the other early targets
+# against its own empty fstab; starting default.target enters none of
+# them again, so what they require on the disk is started here.
+wants=
+for target in $(systemctl list-units --type=target --state=active --plain --no-legend | cut -d' ' -f1); do
+	wants="$wants $(systemctl show -P Requires -P Wants "$target")"
+done
+systemctl start --no-block -- $wants 2>/dev/null
 systemctl start --no-block default.target
 log "default.target started"
