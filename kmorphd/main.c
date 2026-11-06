@@ -419,6 +419,8 @@ static int daemon_setup(struct daemon *d)
 		.network = load_network(),
 		.net_env = &netsnap_default_env,
 		.net_restored_path = STATE_DIR "/network-restored",
+		.next_memory = d->cfg.memory,
+		.pool_claim_path = POOL_CLAIM_PATH,
 	};
 	int ret;
 

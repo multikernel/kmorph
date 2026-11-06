@@ -27,6 +27,7 @@ struct arm_hooks {
 	const char *usb_root;		/* /sys/bus/usb/devices, for usbN names */
 	const char *own_host_tree;	/* the host tree this kernel booted with, if a spawn */
 	const char *dt_cpus;		/* the firmware tree's /cpus, without ACPI */
+	const char *pool_claim_path;	/* memory kmorphd kept for the pool, if this kernel took over */
 	/* The network identity of the NICs but those in skip, as text; NULL: none is handed over. */
 	int (*net_snapshot)(const struct strlist *skip, char **text);
 };

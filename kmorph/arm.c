@@ -54,6 +54,7 @@ const struct arm_hooks arm_default_hooks = {
 	.usb_root = DEVNAME_USB_ROOT,
 	.own_host_tree = HOST_TREE_DIR,
 	.dt_cpus = DEVTREE_CPUS,
+	.pool_claim_path = POOL_CLAIM_PATH,
 	.net_snapshot = net_snapshot,
 };
 
@@ -133,20 +134,37 @@ static int lookup_devices(const struct kmorph_config *cfg, const char *pci_root,
 	return 0;
 }
 
+static int write_baseline(const struct kmorph_config *cfg, const struct mkfs *fs,
+			  uint64_t pool_bytes, const struct range *claim,
+			  const struct pci_list *devices, const struct strlist *platform)
+{
+	void *dtb;
+	size_t len;
+	int ret;
+
+	ret = dt_build_pool_baseline(&cfg->cpus, pool_bytes, claim, devices, platform, &dtb, &len);
+	if (!ret) {
+		ret = mkfs_write_baseline(fs, dtb, len);
+		free(dtb);
+	}
+	return ret;
+}
+
 /*
  * A new pool holds the successor's memory plus one memory granule: the
  * kernel carves its pool park area out of pool
  * memory, so a pool sized exactly to the successor comes up a few pages
- * short.
+ * short. On a kernel that took the machine over, it starts from the
+ * memory kmorphd kept out of this kernel for it.
  */
 static int init_pool(const struct kmorph_config *cfg, const struct mkfs *fs,
 		     const struct arm_hooks *h)
 {
 	struct pci_list devices;
 	struct strlist platform;
+	struct range claim;
 	uint64_t granule, pool_bytes;
-	void *dtb;
-	size_t len;
+	bool claimed = false;
 	int ret;
 
 	if (memory_granule(fs, h->block_size_path, &granule))
@@ -157,14 +175,23 @@ static int init_pool(const struct kmorph_config *cfg, const struct mkfs *fs,
 	if (ret)
 		return ret;
 	console_platform_devices(cfg, &platform);
-	ret = dt_build_pool_baseline(&cfg->cpus, pool_bytes, &devices, &platform, &dtb, &len);
-	free(devices.devs);
-	if (!ret) {
-		ret = mkfs_write_baseline(fs, dtb, len);
-		free(dtb);
+	if (h->pool_claim_path && !pool_claim_read(h->pool_claim_path, &claim)) {
+		ret = write_baseline(cfg, fs, pool_bytes, &claim, &devices, &platform);
+		if (ret)
+			log_warn("cannot claim the %llu MB kept at %#llx for the pool (%s); taking the pool from this kernel",
+				 (unsigned long long)claim.size >> 20,
+				 (unsigned long long)claim.base, strerror(-ret));
+		claimed = !ret;
+		unlink(h->pool_claim_path);
 	}
+	if (!claimed)
+		ret = write_baseline(cfg, fs, pool_bytes, NULL, &devices, &platform);
+	free(devices.devs);
 	if (ret)
 		log_err("pool initialisation failed: %s", strerror(-ret));
+	else if (claimed)
+		log_info("pool initialised with the successor's resources and the %llu MB kept at the takeover",
+			 (unsigned long long)claim.size >> 20);
 	else
 		log_info("pool initialised with the successor's resources");
 	return ret;

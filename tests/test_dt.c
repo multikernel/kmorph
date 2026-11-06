@@ -164,6 +164,8 @@ static void adopt_lists_cpus_and_memory_by_reg(void)
 	CHECK_EQ(fdt_test_get_u64(dtbo, item, "reg", 1), 0x200000);
 	item = fdt_subnode_offset(dtbo, op, "memory@1");
 	CHECK_EQ(fdt_test_get_u64(dtbo, item, "reg", 0), 0x50000000);
+	CHECK_EQ(fdt32_to_cpu(*(const fdt32_t *)fdt_getprop(dtbo, item, "mem-type", NULL)),
+		 DT_MEM_NORMAL);
 
 	free(dtbo);
 	rangeset_free(&mem);
@@ -231,7 +233,7 @@ static void pool_baseline_lists_devices_with_ids(void)
 	size_t len;
 	int res, node, dev, plen;
 
-	CHECK_EQ(dt_build_pool_baseline(&cpus, 1ULL << 30, &devices, NULL, &dtb, &len), 0);
+	CHECK_EQ(dt_build_pool_baseline(&cpus, 1ULL << 30, NULL, &devices, NULL, &dtb, &len), 0);
 	CHECK_EQ(fdtutil_check(dtb, len), 0);
 	res = fdt_path_offset(dtb, "/resources");
 	node = fdt_subnode_offset(dtb, res, "devices");
@@ -255,7 +257,7 @@ static void pool_baseline_lists_platform_devices(void)
 	size_t len;
 	int res, node, dev;
 
-	CHECK_EQ(dt_build_pool_baseline(&cpus, 1ULL << 30, NULL, &platform, &dtb, &len), 0);
+	CHECK_EQ(dt_build_pool_baseline(&cpus, 1ULL << 30, NULL, NULL, &platform, &dtb, &len), 0);
 	res = fdt_path_offset(dtb, "/resources");
 	node = fdt_subnode_offset(dtb, res, "devices");
 	CHECK(node >= 0);
@@ -292,7 +294,7 @@ static void pool_baseline_requests_own_resources_by_size(void)
 	size_t len;
 	int res, mem;
 
-	CHECK_EQ(dt_build_pool_baseline(&cpus, 4ULL << 30, NULL, NULL, &dtb, &len), 0);
+	CHECK_EQ(dt_build_pool_baseline(&cpus, 4ULL << 30, NULL, NULL, NULL, &dtb, &len), 0);
 	CHECK_EQ(fdtutil_check(dtb, len), 0);
 	res = fdt_path_offset(dtb, "/resources");
 	CHECK(res >= 0);
@@ -301,6 +303,31 @@ static void pool_baseline_requests_own_resources_by_size(void)
 	CHECK(mem >= 0);
 	CHECK_EQ(fdt_test_get_u64(dtb, mem, "size", 0), 4ULL << 30);
 	CHECK(fdt_getprop(dtb, mem, "reg", NULL) == NULL);
+	free(dtb);
+}
+
+static void pool_baseline_claims_kept_memory_and_grows_by_the_rest(void)
+{
+	uint64_t ids[] = { 3 };
+	struct cpulist cpus = { ids, 1 };
+	struct range claim = { 0x40000000, 0x10000000 };
+	void *dtb;
+	size_t len;
+	int res, mem;
+
+	CHECK_EQ(dt_build_pool_baseline(&cpus, 0x18000000, &claim, NULL, NULL, &dtb, &len), 0);
+	res = fdt_path_offset(dtb, "/resources");
+	mem = fdt_subnode_offset(dtb, res, "memory@0");
+	CHECK_EQ(fdt_test_get_u64(dtb, mem, "reg", 0), 0x40000000);
+	CHECK_EQ(fdt_test_get_u64(dtb, mem, "reg", 1), 0x10000000);
+	CHECK(fdt_getprop(dtb, mem, "size", NULL) == NULL);
+	mem = fdt_subnode_offset(dtb, res, "memory@1");
+	CHECK_EQ(fdt_test_get_u64(dtb, mem, "size", 0), 0x8000000);
+	free(dtb);
+
+	CHECK_EQ(dt_build_pool_baseline(&cpus, 0x10000000, &claim, NULL, NULL, &dtb, &len), 0);
+	res = fdt_path_offset(dtb, "/resources");
+	CHECK(fdt_subnode_offset(dtb, res, "memory@1") < 0);
 	free(dtb);
 }
 
@@ -449,6 +476,7 @@ TEST_MAIN({
 	RUN(adopt_device_adds_one_function_to_the_instance);
 	RUN(iommu_add_takes_over_one_unit);
 	RUN(pool_baseline_requests_own_resources_by_size);
+	RUN(pool_baseline_claims_kept_memory_and_grows_by_the_rest);
 	RUN(foreign_baseline_names_takeable_by_reg);
 	RUN(pool_view_reports_free_cpus_and_bytes);
 	RUN(pool_view_treats_a_chunkless_tree_as_no_pool);

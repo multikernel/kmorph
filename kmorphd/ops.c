@@ -104,6 +104,45 @@ int ops_fence(struct ops *o)
  * memory granule, so the slivers around control regions and the successor's
  * own RAM stay unclaimed, still readable through /dev/mem.
  */
+/*
+ * A successor armed from here gets its pool as arm sizes a new one, its
+ * memory and one granule, taken whole from the top of the largest range.
+ * Hot-removing that much from this kernel later fails once a single page
+ * of it is pinned, so it never joins this kernel.
+ */
+static int keep_for_pool(struct ops *o, uint64_t granule)
+{
+	struct range *largest = NULL, *c = &o->pool_claim;
+	uint64_t want;
+	size_t i;
+	int ret;
+
+	c->size = 0;
+	if (!o->env.next_memory || !o->env.pool_claim_path)
+		return 0;
+	want = (o->env.next_memory + granule - 1) / granule * granule + granule;
+	for (i = 0; i < o->adoptable.count; i++)
+		if (!largest || o->adoptable.r[i].size > largest->size)
+			largest = &o->adoptable.r[i];
+	if (!largest || largest->size < want) {
+		log_warn("no adoptable range holds the %llu MB of a next pool; arm takes it from this kernel",
+			 (unsigned long long)want >> 20);
+		return 0;
+	}
+	c->base = largest->base + largest->size - want;
+	c->size = want;
+	ret = pool_claim_write(o->env.pool_claim_path, c);
+	if (ret) {
+		log_warn("cannot record the memory kept for the next pool in %s: %s",
+			 o->env.pool_claim_path, strerror(-ret));
+		c->size = 0;
+		return 0;
+	}
+	log_info("%llu MB at %#llx kept for the next pool",
+		 (unsigned long long)c->size >> 20, (unsigned long long)c->base);
+	return rangeset_subtract(&o->adoptable, c->base, c->size);
+}
+
 static int plan_adoption(struct ops *o)
 {
 	struct rangeset own_ram = RANGESET_INIT;
@@ -126,6 +165,8 @@ static int plan_adoption(struct ops *o)
 	ret = memory_granule(&o->fs, o->env.block_size_path, &granule);
 	if (!ret)
 		ret = rangeset_align(&o->takeable.memory, granule, &o->adoptable);
+	if (!ret)
+		ret = keep_for_pool(o, granule);
 	if (ret) {
 		log_err("cannot align to the memory granule: %s", strerror(-ret));
 		return ret;

@@ -29,6 +29,8 @@ struct ops_env {
 	const struct netsnap *network;	/* identity of the NICs to adopt; NULL: none */
 	const struct netsnap_env *net_env;
 	const char *net_restored_path;	/* lists the interfaces put back, for the network manager */
+	uint64_t next_memory;		/* the memory of a successor armed from here; 0: none */
+	const char *pool_claim_path;	/* where the memory kept for its pool is recorded */
 };
 
 struct ops {
@@ -40,6 +42,7 @@ struct ops {
 	struct takeable takeable;
 	struct rangeset adoptable;	/* takeable memory the kernel can hot-add */
 	struct rangeset preserved;	/* adoptable memory left unclaimed for now */
+	struct range pool_claim;	/* takeable memory kept for the next pool */
 	const char **foreign;		/* PCI ids of the predecessor's devices */
 	size_t foreign_count;
 	bool devices_tried;

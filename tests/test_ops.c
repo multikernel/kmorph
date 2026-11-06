@@ -11,6 +11,7 @@
 
 static char root[] = "/tmp/kmorph-test-ops-XXXXXX";
 static char devtree[512], sysfs[512], iomem[512], mem[512], dumpfile[512], blocksize[512];
+static char poolclaim[512];
 static char pci[512];
 static int fenced_ids[8], fenced_count;
 
@@ -256,6 +257,47 @@ static void adopt_aligns_to_the_memory_granule(void)
 	free(tree);
 	put_rel(sysfs, "device_tree", "", 0);
 	put(blocksize, "1000\n", 5);
+}
+
+static void the_next_pool_is_kept_out_of_the_adopted_memory(void)
+{
+	struct ops o;
+	struct range kept;
+	void *dtbo;
+	size_t len, i;
+	uint64_t top = 0;
+	int frag, ov, op, m;
+
+	setup_env(NULL);
+	env.next_memory = 0x1800;
+	env.pool_claim_path = poolclaim;
+	CHECK_EQ(ops_init(&o, &env), 0);
+	CHECK_EQ(ops_adopt(&o), 0);
+	/* the successor's memory rounded up to the 4 KB granule, plus one granule */
+	CHECK_EQ(o.pool_claim.size, 0x3000);
+	CHECK_EQ(pool_claim_read(poolclaim, &kept), 0);
+	CHECK_EQ(kept.base, o.pool_claim.base);
+	CHECK_EQ(kept.size, o.pool_claim.size);
+	for (i = 0; i < o.takeable.memory.count; i++)
+		if (o.takeable.memory.r[i].base + o.takeable.memory.r[i].size == kept.base + kept.size)
+			top = kept.base + kept.size;
+	CHECK_EQ(top, kept.base + kept.size);
+
+	dtbo = read_blob("overlays/new", &len);
+	frag = fdt_path_offset(dtbo, "/fragment@0");
+	ov = fdt_subnode_offset(dtbo, frag, "__overlay__");
+	op = fdt_subnode_offset(dtbo, ov, "memory-add");
+	fdt_for_each_subnode(m, dtbo, op) {
+		uint64_t base = fdt_test_get_u64(dtbo, m, "reg", 0);
+		uint64_t size = fdt_test_get_u64(dtbo, m, "reg", 1);
+
+		CHECK(base + size <= kept.base || base >= kept.base + kept.size);
+	}
+	free(dtbo);
+	ops_free(&o);
+	unlink(poolclaim);
+	env.next_memory = 0;
+	env.pool_claim_path = NULL;
 }
 
 static void adopt_without_dump_takes_everything(void)
@@ -616,6 +658,7 @@ TEST_MAIN({
 	snprintf(mem, sizeof(mem), "%s/mem", root);
 	snprintf(dumpfile, sizeof(dumpfile), "%s/dump", root);
 	snprintf(blocksize, sizeof(blocksize), "%s/block_size_bytes", root);
+	snprintf(poolclaim, sizeof(poolclaim), "%s/pool-memory", root);
 	snprintf(pci, sizeof(pci), "%s/pci", root);
 	populate();
 	RUN(init_reads_identity_and_host_tree);
@@ -624,6 +667,7 @@ TEST_MAIN({
 	RUN(adopt_computes_takeable_and_aligns_to_blocks);
 	RUN(adopt_aligns_to_the_memory_granule);
 	RUN(adopt_without_dump_takes_everything);
+	RUN(the_next_pool_is_kept_out_of_the_adopted_memory);
 	RUN(adopt_with_dump_keeps_memory_until_reaped);
 	RUN(failed_dump_keeps_the_memory_unclaimed);
 	RUN(adopt_devices_takes_every_function_it_lacks_but_bridges);

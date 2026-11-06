@@ -174,6 +174,7 @@ static int emit_memory_add(void *fdt, const struct rangeset *memory)
 		snprintf(node, sizeof(node), "memory@%zu", i);
 		TRY(fdt_begin_node(fdt, node));
 		TRY(fdtutil_prop_reg(fdt, memory->r[i].base, memory->r[i].size));
+		TRY(fdt_property_u32(fdt, "mem-type", DT_MEM_NORMAL));
 		TRY(fdt_end_node(fdt));
 	}
 	return fdt_end_node(fdt);
@@ -259,6 +260,7 @@ int dt_build_iommu_add(const char *name, uint64_t base, void **dtbo, size_t *len
 struct pool_args {
 	const struct cpulist *cpus;
 	uint64_t memory_bytes;
+	const struct range *claim;
 	const struct pci_list *devices;
 	const struct strlist *platform_devices;
 };
@@ -312,14 +314,24 @@ int dt_emit_pci_devices(void *fdt, const struct pci_list *devices)
 static int build_pool_baseline(void *fdt, void *arg)
 {
 	const struct pool_args *a = arg;
+	uint64_t grow = a->memory_bytes;
 
 	TRY(fdt_begin_node(fdt, ""));
 	TRY(fdt_begin_node(fdt, "resources"));
 	TRY(fdtutil_prop_cpulist(fdt, "cpus", a->cpus));
-	TRY(fdt_begin_node(fdt, "memory@0"));
-	TRY(fdt_property_string(fdt, "device_type", "memory"));
-	TRY(fdt_property_u64(fdt, "size", a->memory_bytes));
-	TRY(fdt_end_node(fdt));
+	if (a->claim) {
+		TRY(fdt_begin_node(fdt, "memory@0"));
+		TRY(fdt_property_string(fdt, "device_type", "memory"));
+		TRY(fdtutil_prop_reg(fdt, a->claim->base, a->claim->size));
+		TRY(fdt_end_node(fdt));
+		grow = grow > a->claim->size ? grow - a->claim->size : 0;
+	}
+	if (grow) {
+		TRY(fdt_begin_node(fdt, a->claim ? "memory@1" : "memory@0"));
+		TRY(fdt_property_string(fdt, "device_type", "memory"));
+		TRY(fdt_property_u64(fdt, "size", grow));
+		TRY(fdt_end_node(fdt));
+	}
 	if ((a->devices && a->devices->count) ||
 	    (a->platform_devices && a->platform_devices->count)) {
 		TRY(fdt_begin_node(fdt, "devices"));
@@ -334,12 +346,12 @@ static int build_pool_baseline(void *fdt, void *arg)
 }
 
 int dt_build_pool_baseline(const struct cpulist *cpus, uint64_t memory_bytes,
-			   const struct pci_list *devices,
+			   const struct range *claim, const struct pci_list *devices,
 			   const struct strlist *platform_devices, void **dtb, size_t *len)
 {
-	struct pool_args a = { cpus, memory_bytes, devices, platform_devices };
+	struct pool_args a = { cpus, memory_bytes, claim, devices, platform_devices };
 
-	if (!cpus->count || !memory_bytes)
+	if (!cpus->count || !memory_bytes || (claim && !claim->size))
 		return -EINVAL;
 	return fdtutil_build(build_pool_baseline, &a, dtb, len);
 }

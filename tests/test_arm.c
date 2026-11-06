@@ -8,6 +8,7 @@
 #include "fdt_helpers.h"
 #include "kmorph/file.h"
 #include "kmorph/fdtutil.h"
+#include "kmorph/memblock.h"
 #include "cpio_helpers.h"
 #include "elf_helpers.h"
 #include "kmorph/cpio.h"
@@ -795,6 +796,37 @@ static void new_pool_headroom_is_one_memory_granule(void)
 	config_free(&cfg);
 }
 
+static void a_new_pool_claims_the_memory_kept_at_the_takeover(void)
+{
+	void *tree = fdt_test_granule_tree(4ULL << 20);
+	struct range kept = { 0x40000000, 0x20400000 };
+	struct arm_hooks h = hooks;
+	struct mkfs fs = { sysfs };
+	char err[64], claim[512];
+	void *dtb;
+	size_t len;
+	int res, mem;
+
+	setup();
+	snprintf(claim, sizeof(claim), "%s/pool-memory", sysfs);
+	h.pool_claim_path = claim;
+	CHECK_EQ(pool_claim_write(claim, &kept), 0);
+	config_free(&cfg);
+	config_parse("cpus = 12-15\nmemory = 512MB\nkernel = /boot/vmlinuz\n", &cfg, err, sizeof(err));
+	put("device_tree", tree, fdt_totalsize(tree));
+	free(tree);
+	CHECK_EQ(arm_run(&cfg, &fs, &h), 0);
+	dtb = read_blob("device_tree", &len);
+	res = fdt_path_offset(dtb, "/resources");
+	mem = fdt_subnode_offset(dtb, res, "memory@0");
+	CHECK_EQ(fdt_test_get_u64(dtb, mem, "reg", 0), 0x40000000);
+	CHECK_EQ(fdt_test_get_u64(dtb, mem, "reg", 1), 0x20400000);
+	CHECK(fdt_subnode_offset(dtb, res, "memory@1") < 0);
+	CHECK(access(claim, F_OK) < 0);
+	free(dtb);
+	config_free(&cfg);
+}
+
 static void arm_refuses_a_pool_baseline_with_an_unknown_device(void)
 {
 	struct mkfs fs = { sysfs };
@@ -1086,6 +1118,7 @@ TEST_MAIN({
 	RUN(arm_refuses_more_memory_than_free);
 	RUN(arm_initialises_the_pool_when_there_is_none);
 	RUN(new_pool_headroom_is_one_memory_granule);
+	RUN(a_new_pool_claims_the_memory_kept_at_the_takeover);
 	RUN(arm_refuses_a_pool_baseline_with_an_unknown_device);
 	RUN(missing_pool_devices_are_added_by_overlay);
 	RUN(arm_uses_the_configured_initrd_over_the_default);
