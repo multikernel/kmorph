@@ -9,7 +9,7 @@
 #define STANDBY_ROOT	"/standby"
 /* Under /run, which moves into the root with them */
 #define STANDBY_LAYERS	"/run/kmorph/root"
-#define STANDBY_INIT	"/usr/lib/systemd/systemd"
+#define STANDBY_INIT	"/sbin/init"
 #define STANDBY_CONFIG	"/run/kmorph/kmorph.conf"
 #define STANDBY_NETWORK	"/run/kmorph/network"
 

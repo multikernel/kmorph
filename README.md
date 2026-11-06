@@ -304,15 +304,17 @@ kmorphd: ARMED predecessor=alive last_probe=12ms error=0
 ### kmorphd, in the successor
 
 ```
-kmorphd [--config PATH] [--foreground]
+kmorphd [--config PATH] [--foreground | --wait]
 ```
 
 kmorphd refuses to run in a kernel that was not armed by kmorph, since it
 finds nothing to take over. As the image's init, which is how `kmorph init`
 packs it, it mounts proc, sysfs, devtmpfs and a tmpfs on `/run`, stays in
 the foreground and reaps orphans. Started by another init it daemonises
-unless `--foreground` is given. Either way it logs to the kernel log and
-writes its state to `/run/kmorph/state`:
+unless `--foreground` is given; with `--wait` the command returns only
+once the takeover is done, or fails when kmorphd stops before, so that
+an initramfs can hold its boot on it. Either way it logs to the kernel
+log and writes its state to `/run/kmorph/state`:
 
 ```
 TAKEN_OVER predecessor=silent last_probe=181ms error=0

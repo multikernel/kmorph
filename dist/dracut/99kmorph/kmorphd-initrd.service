@@ -3,10 +3,11 @@ Description=kmorph successor daemon
 DefaultDependencies=no
 ConditionPathExists=/proc/device-tree/chosen/multikernel,host-tree
 After=systemd-udevd.service
-Before=initrd-root-device.target
+Before=initrd.target initrd-cleanup.service initrd-switch-root.target
 
 [Service]
-Type=simple
-ExecStart=/usr/bin/kmorphd --foreground
+Type=forking
+TimeoutStartSec=infinity
+ExecStart=/usr/bin/kmorphd --wait
 Restart=on-failure
 KillMode=process

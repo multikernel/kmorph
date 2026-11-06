@@ -112,6 +112,18 @@ static void mark_taken_over(void)
 		close(fd);
 }
 
+static int ready_fd = -1;
+
+static void report_taken_over(void)
+{
+	if (ready_fd < 0)
+		return;
+	if (write(ready_fd, "", 1) != 1)
+		log_err("cannot report the takeover to the parent: %s", strerror(errno));
+	close(ready_fd);
+	ready_fd = -1;
+}
+
 static void on_state(struct takeover *t, enum takeover_state state)
 {
 	struct daemon *d = container_of(t, struct daemon, tk);
@@ -120,6 +132,7 @@ static void on_state(struct takeover *t, enum takeover_state state)
 	write_state_file(d);
 	if (state != TK_TAKEN_OVER)
 		return;
+	report_taken_over();
 	if (d->cfg.console)
 		console_start(d->cfg.console, d->cfg.console_baud, d->cfg.console_login);
 	mark_taken_over();
@@ -505,17 +518,39 @@ static void daemon_run(struct daemon *d)
 	}
 }
 
-static void daemonize(void)
+static int wait_for_takeover(int pipefd[2])
 {
-	pid_t pid = fork();
-	int null;
+	ssize_t n;
+	char done;
 
+	close(pipefd[1]);
+	do
+		n = read(pipefd[0], &done, 1);
+	while (n < 0 && errno == EINTR);
+	return n == 1 ? 0 : 1;
+}
+
+/* With wait, the first process exits only once the takeover is done, so its caller waits too. */
+static void daemonize(bool wait)
+{
+	int pipefd[2], null;
+	pid_t pid;
+
+	if (wait && pipe2(pipefd, O_CLOEXEC) < 0) {
+		log_err("pipe: %s", strerror(errno));
+		exit(1);
+	}
+	pid = fork();
 	if (pid < 0) {
 		log_err("fork: %s", strerror(errno));
 		exit(1);
 	}
 	if (pid > 0)
-		exit(0);
+		exit(wait ? wait_for_takeover(pipefd) : 0);
+	if (wait) {
+		close(pipefd[0]);
+		ready_fd = pipefd[1];
+	}
 	setsid();
 	if (chdir("/") < 0)
 		log_warn("chdir /: %s", strerror(errno));
@@ -532,7 +567,7 @@ static void daemonize(void)
 
 static void usage(void)
 {
-	fprintf(stderr, "usage: kmorphd [--config PATH] [--foreground]\n");
+	fprintf(stderr, "usage: kmorphd [--config PATH] [--foreground | --wait]\n");
 	exit(2);
 }
 
@@ -541,21 +576,23 @@ int main(int argc, char **argv)
 	static const struct option opts[] = {
 		{ "config", required_argument, NULL, 'c' },
 		{ "foreground", no_argument, NULL, 'f' },
+		{ "wait", no_argument, NULL, 'w' },
 		{ NULL, 0, NULL, 0 },
 	};
 	struct daemon d;
 	const char *config_path = KMORPH_CONFIG_PATH;
 	char err[128];
-	int c, foreground = 0, ret;
+	int c, foreground = 0, wait = 0, ret;
 
-	while ((c = getopt_long(argc, argv, "c:f", opts, NULL)) != -1) {
+	while ((c = getopt_long(argc, argv, "c:fw", opts, NULL)) != -1) {
 		switch (c) {
 		case 'c': config_path = optarg; break;
 		case 'f': foreground = 1; break;
+		case 'w': wait = 1; break;
 		default: usage();
 		}
 	}
-	if (optind != argc)
+	if (optind != argc || (foreground && wait))
 		usage();
 
 	/* As init nothing is mounted yet, not even the /dev the kernel log is reached through. */
@@ -589,7 +626,7 @@ int main(int argc, char **argv)
 	}
 
 	if (!foreground && !d.init)
-		daemonize();
+		daemonize(wait);
 
 	ret = daemon_setup(&d);
 	if (ret) {

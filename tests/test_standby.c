@@ -70,7 +70,7 @@ static void the_image_becomes_the_root_before_its_init_runs(void)
 		    "chdir /standby;move . /;chroot .;chdir /;"
 		    "write /proc/sys/net/ipv4/ip_nonlocal_bind 1;"
 		    "write /proc/sys/net/ipv6/ip_nonlocal_bind 1;"
-		    "fork;exec /usr/lib/systemd/systemd;idle;");
+		    "fork;exec /sbin/init;idle;");
 }
 
 static void the_child_goes_on_as_kmorphd(void)
@@ -119,7 +119,7 @@ static void an_image_without_a_network_identity_still_switches(void)
 {
 	run("copy /etc/kmorph/network /run/kmorph/network;", -ENOENT);
 	CHECK_EQ(standby_enter(&env, "/etc/kmorph/kmorph.conf"), -ENOENT);
-	CHECK(strstr(trace, "exec /usr/lib/systemd/systemd;"));
+	CHECK(strstr(trace, "exec /sbin/init;"));
 }
 
 static void a_failed_move_puts_back_what_was_moved(void)

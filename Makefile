@@ -96,7 +96,6 @@ install: all
 	$(INSTALL) -d $(DESTDIR)$(IRTDIR)/hooks $(DESTDIR)$(IRTDIR)/scripts/init-premount
 	$(INSTALL) -m 0755 dist/dracut/99kmorph/module-setup.sh $(DESTDIR)$(DRACUTDIR)/
 	$(INSTALL) -m 0644 dist/dracut/99kmorph/kmorphd-initrd.service $(DESTDIR)$(DRACUTDIR)/
-	$(INSTALL) -m 0644 dist/dracut/99kmorph/kmorph-takeover-wait.service $(DESTDIR)$(DRACUTDIR)/
 	$(INSTALL) -m 0755 dist/dracut/kmorph-mkimage $(DESTDIR)$(LIBDIR)/
 	$(INSTALL) -d $(DESTDIR)$(STANDBYDIR)
 	$(INSTALL) -m 0755 dist/dracut/99kmorph-standby/module-setup.sh dist/standby/kmorph-switch $(DESTDIR)$(STANDBYDIR)/
