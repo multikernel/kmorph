@@ -23,6 +23,7 @@ KERNEL="/boot/vmlinuz-$KERNEL_VERSION"
 CMDLINE=""
 for word in $(cat /proc/cmdline); do
 	case "$word" in
+	rd.retry=*|rd.timeout=*) ;;
 	root=*|rootflags=*|rootfstype=*|rd.*|ro|rw) CMDLINE="$CMDLINE $word" ;;
 	esac
 done
