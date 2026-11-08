@@ -88,23 +88,23 @@ static int open_events(void)
 	}
 }
 
-int watch_run(const struct kmorph_config *cfg, const struct mkfs *fs)
+int watch_run(const struct kmorph_config *cfg, const char *name, const struct mkfs *fs)
 {
 	static char sent[NETSNAP_TEXT_MAX], now[NETSNAP_TEXT_MAX];
 	int fd, ret, last_err = 0;
 	uint32_t id, sent_to = 0;
 
-	if (mkfs_instance_id(fs, cfg->name, &id)) {
-		log_err("watch: %s is not armed", cfg->name);
+	if (mkfs_instance_id(fs, name, &id)) {
+		log_err("watch: %s is not armed", name);
 		return -ENOENT;
 	}
 	/* Subscribed before the first snapshot, so that no change slips in between */
 	fd = open_events();
-	log_info("watch: handing network changes to %s", cfg->name);
+	log_info("watch: handing network changes to %s", name);
 	for (;;) {
 		ret = netsnap_text(&cfg->devices, now, sizeof(now));
 		/* A re-armed successor has a new id and only the identity of its arm time */
-		if (ret >= 0 && mkfs_instance_id(fs, cfg->name, &id))
+		if (ret >= 0 && mkfs_instance_id(fs, name, &id))
 			ret = -ENOENT;
 		if (ret >= 0 && (id != sent_to || strcmp(now, sent))) {
 			int links = ret;

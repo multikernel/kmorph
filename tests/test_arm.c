@@ -212,7 +212,7 @@ static void setup(void)
 {
 	char err[64];
 
-	config_parse("name = successor\ncpus = 12-15\nmemory = 4GB\n"
+	config_parse("cpus = 12-15\nmemory = 4GB\n"
 		     "kernel = /boot/vmlinuz\ncmdline = quiet\n", &cfg, err, sizeof(err));
 	memset(&calls, 0, sizeof(calls));
 	put_image();
@@ -222,9 +222,9 @@ static void setup(void)
 	mkdir_rel("overlays/tx_7");
 	put("overlays/tx_7/status", "applied\n", 8);
 	mkdir_rel("instances");
-	mkdir_rel("instances/successor");
-	put("instances/successor/id", "5\n", 2);
-	put("instances/successor/status", "active\n", 7);
+	mkdir_rel("instances/generation-1");
+	put("instances/generation-1/id", "5\n", 2);
+	put("instances/generation-1/status", "active\n", 7);
 	put_root_tree(8ULL << 30);
 	{
 		const uint8_t apics[] = { 0, 1, 2, 3 };
@@ -243,7 +243,7 @@ static void arm_creates_loads_and_execs(void)
 	int frag, ov, op, res;
 
 	setup();
-	CHECK_EQ(arm_run(&cfg, &fs, &hooks), 0);
+	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &hooks), 0);
 	CHECK_STREQ(calls.seq, "KLE");
 	CHECK_EQ(calls.kernel_fd, 42);
 	{
@@ -264,7 +264,7 @@ static void arm_creates_loads_and_execs(void)
 	CHECK_STREQ(fdt_getprop(dtbo, frag, "target-path", NULL), "/instances");
 	ov = fdt_subnode_offset(dtbo, frag, "__overlay__");
 	op = fdt_subnode_offset(dtbo, ov, "instance-create");
-	CHECK_STREQ(fdt_getprop(dtbo, op, "instance-name", NULL), "successor");
+	CHECK_STREQ(fdt_getprop(dtbo, op, "instance-name", NULL), "generation-1");
 	res = fdt_subnode_offset(dtbo, op, "resources");
 	CHECK_EQ(fdt_test_get_u64(dtbo, res, "memory-bytes", 0), 4ULL << 30);
 	free(dtbo);
@@ -280,7 +280,7 @@ static void dump_config_relaxes_the_successors_devmem(void)
 	config_free(&cfg);
 	config_parse("cpus = 12\nmemory = 1GB\nkernel = /boot/vmlinuz\ncmdline = quiet\n"
 		     "dump = /var/crash/vmcore\n", &cfg, err, sizeof(err));
-	CHECK_EQ(arm_run(&cfg, &fs, &hooks), 0);
+	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &hooks), 0);
 	CHECK_STREQ(calls.cmdline, "quiet iomem=relaxed");
 	config_free(&cfg);
 
@@ -288,7 +288,7 @@ static void dump_config_relaxes_the_successors_devmem(void)
 	config_free(&cfg);
 	config_parse("cpus = 12\nmemory = 1GB\nkernel = /boot/vmlinuz\ndump = /var/crash/vmcore\n",
 		     &cfg, err, sizeof(err));
-	CHECK_EQ(arm_run(&cfg, &fs, &hooks), 0);
+	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &hooks), 0);
 	CHECK_STREQ(calls.cmdline, "iomem=relaxed");
 	config_free(&cfg);
 
@@ -297,7 +297,7 @@ static void dump_config_relaxes_the_successors_devmem(void)
 	config_parse("cpus = 12\nmemory = 1GB\nkernel = /boot/vmlinuz\n"
 		     "cmdline = iomem=relaxed quiet\ndump = /var/crash/vmcore\n",
 		     &cfg, err, sizeof(err));
-	CHECK_EQ(arm_run(&cfg, &fs, &hooks), 0);
+	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &hooks), 0);
 	CHECK_STREQ(calls.cmdline, "iomem=relaxed quiet");
 	config_free(&cfg);
 }
@@ -314,7 +314,7 @@ static void arm_passes_devices_to_the_instance(void)
 	config_free(&cfg);
 	config_parse("cpus = 12\nmemory = 1GB\nkernel = /boot/vmlinuz\ndevices = 0000:09:00.0\n",
 		     &cfg, err, sizeof(err));
-	CHECK_EQ(arm_run(&cfg, &fs, &hooks), 0);
+	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &hooks), 0);
 	dtbo = read_blob("overlays/new", &len);
 	frag = fdt_path_offset(dtbo, "/fragment@1");
 	CHECK(frag >= 0);
@@ -349,7 +349,7 @@ static void arm_hands_over_a_host_tree_from_firmware_and_sysfs(void)
 	put_madt(apics, 4);
 	CHECK_EQ(file_write(iomem_path, iomem, sizeof(iomem) - 1), 0);
 	put_pci_device("0000:09:00.0", "0x1af4\n", "0x1041\n");
-	CHECK_EQ(arm_run(&cfg, &fs, &hooks), 0);
+	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &hooks), 0);
 	dtbo = read_blob("overlays/new", &len);
 	ht = chosen_host_tree(dtbo);
 	CHECK(ht >= 0);
@@ -380,7 +380,7 @@ static void config_machine_cpus_override_the_madt(void)
 		     &cfg, err, sizeof(err));
 	put_madt(apics, 2);
 	CHECK_EQ(file_write(iomem_path, iomem, sizeof(iomem) - 1), 0);
-	CHECK_EQ(arm_run(&cfg, &fs, &hooks), 0);
+	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &hooks), 0);
 	dtbo = read_blob("overlays/new", &len);
 	ht = chosen_host_tree(dtbo);
 	CHECK(ht >= 0);
@@ -443,7 +443,7 @@ static void arm_records_the_crash_layout_in_the_host_tree(void)
 	put_cpu_note(0, "7fc01000\n");
 	put_cpu_note(1, "7fc01400\n");
 	put_kcore_with_direct_map();
-	CHECK_EQ(arm_run(&cfg, &fs, &hooks), 0);
+	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &hooks), 0);
 	dtbo = read_blob("overlays/new", &len);
 	ht = chosen_host_tree(dtbo);
 	vm = fdt_subnode_offset(dtbo, ht, "vmcore");
@@ -467,7 +467,7 @@ static void arm_without_a_dump_omits_the_vmcore_node(void)
 	int ht;
 
 	setup();
-	CHECK_EQ(arm_run(&cfg, &fs, &hooks), 0);
+	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &hooks), 0);
 	dtbo = read_blob("overlays/new", &len);
 	ht = chosen_host_tree(dtbo);
 	CHECK(ht >= 0);
@@ -498,7 +498,7 @@ static void arm_without_crash_support_omits_the_vmcore_node(void)
 		snprintf(path, sizeof(path), "%s/cpu1/crash_notes", cpu_root);
 		unlink(path);
 	}
-	CHECK_EQ(arm_run(&cfg, &fs, &hooks), 0);
+	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &hooks), 0);
 	dtbo = read_blob("overlays/new", &len);
 	ht = chosen_host_tree(dtbo);
 	CHECK(ht >= 0);
@@ -514,7 +514,7 @@ static void arm_refuses_to_proceed_without_a_host_tree(void)
 	setup();
 	unlink(madt_path);
 	unlink(iomem_path);
-	CHECK(arm_run(&cfg, &fs, &hooks) < 0);
+	CHECK(arm_run(&cfg, "generation-1", &fs, &hooks) < 0);
 	CHECK_STREQ(calls.seq, "");
 	config_free(&cfg);
 }
@@ -552,7 +552,7 @@ static void arm_without_acpi_hands_over_its_own_host_tree(void)
 	setup();
 	unlink(madt_path);
 	put_own_host_tree();
-	CHECK_EQ(arm_run(&cfg, &fs, &hooks), 0);
+	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &hooks), 0);
 	remove_own_host_tree();
 	dtbo = read_blob("overlays/new", &size);
 	ht = chosen_host_tree(dtbo);
@@ -596,7 +596,7 @@ static void arm_without_acpi_reads_the_firmware_tree_cpus(void)
 	put_dt_cpu("cpu@0", "cpu", &r0, sizeof(r0));
 	put_dt_cpu("l2-cache0", "cache", &r0, sizeof(r0));
 	mkdir_rel("dtcpus/cpu-map");
-	CHECK_EQ(arm_run(&cfg, &fs, &hooks), 0);
+	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &hooks), 0);
 	dtbo = read_blob("overlays/new", &size);
 	ht = chosen_host_tree(dtbo);
 	CHECK_EQ(fdt_getprop(dtbo, ht, "cpus", &len) ? len : 0, 16);
@@ -610,10 +610,10 @@ static void arm_without_acpi_reads_the_firmware_tree_cpus(void)
 	put("dtcpus/#address-cells", &two, sizeof(two));
 	put_dt_cpu("cpu@0", "cpu", r100, sizeof(r100));
 	put_dt_cpu("cpu@1", "cpu", r100, sizeof(r1));
-	CHECK(arm_run(&cfg, &fs, &hooks) < 0);
+	CHECK(arm_run(&cfg, "generation-1", &fs, &hooks) < 0);
 	put_dt_cpu("cpu@1", "cpu", NULL, 0);
 	put("dtcpus/cpu@1/reg", r100, sizeof(r100));
-	CHECK_EQ(arm_run(&cfg, &fs, &hooks), 0);
+	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &hooks), 0);
 	dtbo = read_blob("overlays/new", &size);
 	ht = chosen_host_tree(dtbo);
 	CHECK_EQ(fdt_getprop(dtbo, ht, "cpus", &len) ? len : 0, 8);
@@ -668,7 +668,7 @@ static void console_config_hands_the_serial_device_to_the_successor(void)
 	setup();
 	put_root_tree_with_serial();
 	parse_console_config();
-	CHECK_EQ(arm_run(&cfg, &fs, &hooks), 0);
+	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &hooks), 0);
 	dtbo = read_blob("overlays/new", &len);
 	frag = fdt_path_offset(dtbo, "/fragment@0");
 	ov = fdt_subnode_offset(dtbo, frag, "__overlay__");
@@ -693,7 +693,7 @@ static void console_config_puts_the_serial_device_in_a_new_pool(void)
 	setup();
 	parse_console_config();
 	put("device_tree", "", 0);
-	CHECK_EQ(arm_run(&cfg, &fs, &hooks), 0);
+	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &hooks), 0);
 	dtb = read_blob("device_tree", &len);
 	res = fdt_path_offset(dtb, "/resources");
 	devs = fdt_subnode_offset(dtb, res, "devices");
@@ -711,7 +711,7 @@ static void console_config_refuses_a_pool_without_the_serial_device(void)
 
 	setup();
 	parse_console_config();
-	CHECK_EQ(arm_run(&cfg, &fs, &hooks), -ENOENT);
+	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &hooks), -ENOENT);
 	CHECK_STREQ(calls.seq, "");
 	config_free(&cfg);
 }
@@ -724,7 +724,7 @@ static void arm_refuses_cpus_outside_the_pool(void)
 	setup();
 	config_free(&cfg);
 	config_parse("cpus = 12-16\nmemory = 1GB\nkernel = /boot/vmlinuz\n", &cfg, err, sizeof(err));
-	CHECK_EQ(arm_run(&cfg, &fs, &hooks), -ENOENT);
+	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &hooks), -ENOENT);
 	CHECK_STREQ(calls.seq, "");
 	config_free(&cfg);
 }
@@ -735,7 +735,7 @@ static void arm_refuses_more_memory_than_free(void)
 
 	setup();
 	put_root_tree(1ULL << 30);
-	CHECK_EQ(arm_run(&cfg, &fs, &hooks), -ENOSPC);
+	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &hooks), -ENOSPC);
 	CHECK_STREQ(calls.seq, "");
 	config_free(&cfg);
 }
@@ -754,7 +754,7 @@ static void arm_initialises_the_pool_when_there_is_none(void)
 		     &cfg, err, sizeof(err));
 	put_pci_device("0000:09:00.0", "0x1af4\n", "0x1041\n");
 	put("device_tree", "", 0);
-	CHECK_EQ(arm_run(&cfg, &fs, &hooks), 0);
+	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &hooks), 0);
 	CHECK_STREQ(calls.seq, "KLE");
 	dtb = read_blob("device_tree", &len);
 	CHECK_EQ(fdtutil_check(dtb, len), 0);
@@ -787,7 +787,7 @@ static void new_pool_headroom_is_one_memory_granule(void)
 	config_parse("cpus = 12-15\nmemory = 4GB\nkernel = /boot/vmlinuz\n", &cfg, err, sizeof(err));
 	put("device_tree", tree, fdt_totalsize(tree));
 	free(tree);
-	CHECK_EQ(arm_run(&cfg, &fs, &hooks), 0);
+	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &hooks), 0);
 	dtb = read_blob("device_tree", &len);
 	res = fdt_path_offset(dtb, "/resources");
 	CHECK_EQ(fdt_test_get_u64(dtb, fdt_subnode_offset(dtb, res, "memory@0"), "size", 0),
@@ -815,7 +815,7 @@ static void a_new_pool_claims_the_memory_kept_at_the_takeover(void)
 	config_parse("cpus = 12-15\nmemory = 512MB\nkernel = /boot/vmlinuz\n", &cfg, err, sizeof(err));
 	put("device_tree", tree, fdt_totalsize(tree));
 	free(tree);
-	CHECK_EQ(arm_run(&cfg, &fs, &h), 0);
+	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &h), 0);
 	dtb = read_blob("device_tree", &len);
 	res = fdt_path_offset(dtb, "/resources");
 	mem = fdt_subnode_offset(dtb, res, "memory@0");
@@ -837,7 +837,7 @@ static void arm_refuses_a_pool_baseline_with_an_unknown_device(void)
 	config_parse("cpus = 12\nmemory = 1GB\nkernel = /boot/vmlinuz\ndevices = 0000:0b:00.0\n",
 		     &cfg, err, sizeof(err));
 	put("device_tree", "", 0);
-	CHECK_EQ(arm_run(&cfg, &fs, &hooks), -ENOENT);
+	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &hooks), -ENOENT);
 	CHECK_STREQ(calls.seq, "");
 	config_free(&cfg);
 }
@@ -888,7 +888,7 @@ static void arm_uses_the_configured_initrd_over_the_default(void)
 	snprintf(other, sizeof(other), "%s/other.img", sysfs);
 	CHECK_EQ(file_write(other, "OTHER-IMAGE-BYTES", 17), 0);
 	cfg.initrd = strdup(other);
-	CHECK_EQ(arm_run(&cfg, &fs, &hooks), 0);
+	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &hooks), 0);
 	CHECK(calls.initrd_len > 17);
 	CHECK(memcmp(calls.initrd, "OTHER-IMAGE-BYTES", 17) == 0);
 	CHECK(memcmp(calls.initrd + 17, "\0\0\0", 3) == 0);
@@ -909,7 +909,7 @@ static void arm_refuses_a_missing_image_before_creating_the_instance(void)
 
 	setup();
 	unlink(image_path);
-	CHECK_EQ(arm_run(&cfg, &fs, &hooks), -ENOENT);
+	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &hooks), -ENOENT);
 	CHECK_STREQ(calls.seq, "");
 	dtbo = read_blob("overlays/new", &dtbo_len);
 	CHECK_EQ(dtbo_len, 0);
@@ -941,7 +941,7 @@ static void device_names_resolve_to_pci_addresses(void)
 	config_free(&cfg);
 	config_parse("cpus = 12\nmemory = 1GB\nkernel = /boot/vmlinuz\ndevices = eth9\n",
 		     &cfg, err, sizeof(err));
-	CHECK_EQ(arm_run(&cfg, &fs, &hooks), 0);
+	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &hooks), 0);
 	CHECK_STREQ(cfg.devices.items[0], "eth9");
 	dtbo = read_blob("overlays/new", &len);
 	frag = fdt_path_offset(dtbo, "/fragment@1");
@@ -955,7 +955,7 @@ static void device_names_resolve_to_pci_addresses(void)
 	memset(&calls, 0, sizeof(calls));
 	config_parse("cpus = 12\nmemory = 1GB\nkernel = /boot/vmlinuz\ndevices = nosuch0\n",
 		     &cfg, err, sizeof(err));
-	CHECK_EQ(arm_run(&cfg, &fs, &hooks), -ENOENT);
+	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &hooks), -ENOENT);
 	CHECK_STREQ(calls.seq, "");
 	config_free(&cfg);
 }
@@ -968,7 +968,7 @@ static void arm_needs_kernel_cpus_and_memory(void)
 	setup();
 	config_free(&cfg);
 	config_parse("cpus = 12\nmemory = 1GB\n", &cfg, err, sizeof(err));
-	CHECK_EQ(arm_run(&cfg, &fs, &hooks), -EINVAL);
+	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &hooks), -EINVAL);
 	config_free(&cfg);
 }
 
@@ -977,8 +977,8 @@ static void disarm_of_a_loaded_instance_skips_the_halt(void)
 	struct mkfs fs = { sysfs };
 
 	setup();
-	put("instances/successor/status", "loaded\n", 7);
-	CHECK_EQ(disarm_run(&cfg, &fs, &hooks), 0);
+	put("instances/generation-1/status", "loaded\n", 7);
+	CHECK_EQ(disarm_run("generation-1", &fs, &hooks), 0);
 	CHECK_STREQ(calls.seq, "U");
 	config_free(&cfg);
 }
@@ -988,8 +988,8 @@ static void disarm_of_a_bare_instance_only_removes_it(void)
 	struct mkfs fs = { sysfs };
 
 	setup();
-	put("instances/successor/status", "ready\n", 6);
-	CHECK_EQ(disarm_run(&cfg, &fs, &hooks), 0);
+	put("instances/generation-1/status", "ready\n", 6);
+	CHECK_EQ(disarm_run("generation-1", &fs, &hooks), 0);
 	CHECK_STREQ(calls.seq, "");
 	config_free(&cfg);
 }
@@ -1002,7 +1002,7 @@ static void disarm_halts_then_removes_the_instance(void)
 	int frag, ov, op;
 
 	setup();
-	CHECK_EQ(disarm_run(&cfg, &fs, &hooks), 0);
+	CHECK_EQ(disarm_run("generation-1", &fs, &hooks), 0);
 	CHECK_STREQ(calls.seq, "HU");
 	CHECK_EQ(calls.halt_id, 5);
 	CHECK_EQ(calls.unloaded_id, 5);
@@ -1010,7 +1010,7 @@ static void disarm_halts_then_removes_the_instance(void)
 	frag = fdt_path_offset(dtbo, "/fragment@0");
 	ov = fdt_subnode_offset(dtbo, frag, "__overlay__");
 	op = fdt_subnode_offset(dtbo, ov, "instance-remove");
-	CHECK_STREQ(fdt_getprop(dtbo, op, "instance-name", NULL), "successor");
+	CHECK_STREQ(fdt_getprop(dtbo, op, "instance-name", NULL), "generation-1");
 	free(dtbo);
 	config_free(&cfg);
 }
@@ -1068,11 +1068,11 @@ static void arm_hands_the_network_identity_to_the_successor(void)
 
 	setup();
 	config_free(&cfg);
-	config_parse("name = successor\ncpus = 12-15\nmemory = 4GB\n"
+	config_parse("cpus = 12-15\nmemory = 4GB\n"
 		     "kernel = /boot/vmlinuz\ndevices = 0000:00:1f.6\n", &cfg, err, sizeof(err));
 	put_pci_device("0000:00:1f.6", "0x8086", "0x15b8");
 	h.net_snapshot = fake_net_snapshot;
-	CHECK_EQ(arm_run(&cfg, &fs, &h), 0);
+	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &h), 0);
 	CHECK_STREQ(snapshot_skipped, "0000:00:1f.6");
 	CHECK_EQ(appended_entry("etc/kmorph/network", &e), 1);
 	CHECK(e.len && !memcmp(e.data, "link 0000:01:00.0 enp1s0", 24));

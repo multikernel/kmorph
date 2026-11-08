@@ -368,8 +368,8 @@ static void release_host_tree(const struct kmorph_config *cfg, struct host_tree 
 	host_tree_free(ht);
 }
 
-static int create_instance(const struct kmorph_config *cfg, const struct mkfs *fs,
-			   const struct arm_hooks *h)
+static int create_instance(const struct kmorph_config *cfg, const char *name,
+			   const struct mkfs *fs, const struct arm_hooks *h)
 {
 	struct strlist platform;
 	struct host_tree ht;
@@ -381,7 +381,7 @@ static int create_instance(const struct kmorph_config *cfg, const struct mkfs *f
 	ret = build_host_tree(cfg, h, &ht);
 	if (ret)
 		return ret;
-	ret = dt_build_instance_create(cfg->name, &cfg->cpus, cfg->memory, &cfg->devices,
+	ret = dt_build_instance_create(name, &cfg->cpus, cfg->memory, &cfg->devices,
 				       &platform, &ht, &dtbo, &len);
 	release_host_tree(cfg, &ht);
 	if (ret)
@@ -635,7 +635,8 @@ static int resolve_devices(const struct kmorph_config *cfg, const struct arm_hoo
 	return 0;
 }
 
-int arm_run(const struct kmorph_config *cfg, const struct mkfs *fs, const struct arm_hooks *h)
+int arm_run(const struct kmorph_config *cfg, const char *name, const struct mkfs *fs,
+	    const struct arm_hooks *h)
 {
 	struct kmorph_config resolved;
 	struct strlist devices;
@@ -661,22 +662,22 @@ int arm_run(const struct kmorph_config *cfg, const struct mkfs *fs, const struct
 		ret = initrd_fd;
 		goto out;
 	}
-	ret = create_instance(cfg, fs, h);
+	ret = create_instance(cfg, name, fs, h);
 	if (ret)
 		goto out;
-	ret = mkfs_instance_id(fs, cfg->name, &id);
+	ret = mkfs_instance_id(fs, name, &id);
 	if (ret) {
-		log_err("instance %s has no id after creation: %s", cfg->name, strerror(-ret));
+		log_err("instance %s has no id after creation: %s", name, strerror(-ret));
 		goto out;
 	}
-	log_info("instance %s created with id %u", cfg->name, id);
+	log_info("instance %s created with id %u", name, id);
 
 	ret = load_and_exec(cfg, h, id, initrd_fd);
 	if (ret) {
 		log_err("successor left in place; run 'kmorph disarm' to remove it");
 		goto out;
 	}
-	log_info("successor %s armed", cfg->name);
+	log_info("successor %s armed", name);
 out:
 	if (initrd_fd >= 0)
 		close(initrd_fd);
@@ -684,7 +685,7 @@ out:
 	return ret;
 }
 
-int disarm_run(const struct kmorph_config *cfg, const struct mkfs *fs, const struct arm_hooks *h)
+int disarm_run(const char *name, const struct mkfs *fs, const struct arm_hooks *h)
 {
 	char status[32];
 	void *dtbo;
@@ -692,12 +693,12 @@ int disarm_run(const struct kmorph_config *cfg, const struct mkfs *fs, const str
 	uint32_t id;
 	int tx, ret;
 
-	ret = mkfs_instance_id(fs, cfg->name, &id);
+	ret = mkfs_instance_id(fs, name, &id);
 	if (ret) {
-		log_err("no instance named %s", cfg->name);
+		log_err("no instance named %s", name);
 		return ret;
 	}
-	if (mkfs_instance_status(fs, cfg->name, status, sizeof(status)))
+	if (mkfs_instance_status(fs, name, status, sizeof(status)))
 		snprintf(status, sizeof(status), "unknown");
 	if (!strcmp(status, "active")) {
 		ret = h->halt(id);
@@ -715,7 +716,7 @@ int disarm_run(const struct kmorph_config *cfg, const struct mkfs *fs, const str
 		}
 	}
 
-	ret = dt_build_instance_remove(cfg->name, &dtbo, &len);
+	ret = dt_build_instance_remove(name, &dtbo, &len);
 	if (ret)
 		return ret;
 	ret = mkfs_apply_overlay(fs, dtbo, len, &tx);
@@ -723,6 +724,6 @@ int disarm_run(const struct kmorph_config *cfg, const struct mkfs *fs, const str
 	if (ret)
 		log_err("instance-remove overlay failed (tx %d): %s", tx, strerror(-ret));
 	else
-		log_info("successor %s disarmed", cfg->name);
+		log_info("successor %s disarmed", name);
 	return ret;
 }

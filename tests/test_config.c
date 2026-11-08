@@ -9,7 +9,6 @@ static void defaults_apply_when_keys_are_absent(void)
 	char err[128];
 
 	CHECK_EQ(config_parse("", &c, err, sizeof(err)), 0);
-	CHECK_STREQ(c.name, "successor");
 	CHECK_EQ(c.probe_interval_ms, 100);
 	CHECK_EQ(c.probe_timeouts, 5);
 	CHECK_EQ(c.fence_retries, 3);
@@ -27,7 +26,6 @@ static void parses_every_key_with_comments_and_spacing(void)
 {
 	const char *text =
 		"# successor\n"
-		"name = backup\n"
 		"cpus=12-15,20\n"
 		"  memory   = 4GB  \n"
 		"kernel = /boot/vmlinuz\n"
@@ -47,7 +45,6 @@ static void parses_every_key_with_comments_and_spacing(void)
 	char err[128];
 
 	CHECK_EQ(config_parse(text, &c, err, sizeof(err)), 0);
-	CHECK_STREQ(c.name, "backup");
 	CHECK_EQ(c.cpus.count, 5);
 	CHECK_EQ(c.cpus.ids[4], 20);
 	CHECK_EQ(c.memory, 4ULL << 30);
@@ -85,7 +82,7 @@ static void unknown_key_is_reported_with_line(void)
 	struct kmorph_config c;
 	char err[128];
 
-	CHECK(config_parse("name = a\nbogus = 1\n", &c, err, sizeof(err)) < 0);
+	CHECK(config_parse("cpus = 1\nbogus = 1\n", &c, err, sizeof(err)) < 0);
 	CHECK(strstr(err, "line 2") != NULL);
 	CHECK(strstr(err, "bogus") != NULL);
 }
@@ -124,10 +121,10 @@ static void load_reads_a_file(void)
 	int fd = mkstemp(path);
 
 	CHECK(fd >= 0);
-	CHECK(write(fd, "name = fromfile\n", 16) == 16);
+	CHECK(write(fd, "kernel = /boot/fromfile\n", 24) == 24);
 	close(fd);
 	CHECK_EQ(config_load(path, &c, err, sizeof(err)), 0);
-	CHECK_STREQ(c.name, "fromfile");
+	CHECK_STREQ(c.kernel, "/boot/fromfile");
 	config_free(&c);
 	unlink(path);
 	CHECK(config_load("/nonexistent/kmorph.conf", &c, err, sizeof(err)) < 0);

@@ -11,6 +11,6 @@ int watch_push(unsigned int id, const struct strlist *skip);
  * Keeps the armed successor's copy of the network identity current. A
  * crash leaves no time to send it, so it goes whenever it changes.
  */
-int watch_run(const struct kmorph_config *cfg, const struct mkfs *fs);
+int watch_run(const struct kmorph_config *cfg, const char *name, const struct mkfs *fs);
 
 #endif

@@ -20,6 +20,11 @@ struct self_info {
 };
 
 bool devtree_has_host_tree(const char *root);
+/*
+ * The instance name of the successor this kernel arms: generation-N, N
+ * one past this kernel's own generation, the host being generation 0.
+ */
+void devtree_successor_name(const char *root, char *buf, size_t len);
 int devtree_read_self(const char *root, struct self_info *s);
 /* The register sets of the host's VT-d units this kernel boots behind; none is no error. */
 int devtree_read_iommus(const char *root, struct rangelist *out);

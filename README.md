@@ -127,10 +127,10 @@ production.
    # kmorph arm
    kmorph: pool initialised with the successor's resources
    kmorph: host tree: 4 CPUs, 2047 MB in 2 ranges, 24 PCI devices
-   kmorph: instance successor created with id 1
-   kmorph: successor successor armed
+   kmorph: instance generation-1 created with id 1
+   kmorph: successor generation-1 armed
    # kmorph status
-   successor: active (instance successor, id 1)
+   successor: active (instance generation-1, id 1)
    kmorphd: ARMED predecessor=alive last_probe=123ms error=0
    ```
 
@@ -221,7 +221,6 @@ else has a default. `kmorph.conf.example` lists every key.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `name` | `successor` | Instance name in `/sys/fs/multikernel/instances`. |
 | `cpus` | | CPUs for the successor, as physical ids the kernel uses (APIC ids on x86, MPIDRs on arm64), e.g. `1` or `12-15,20`. |
 | `memory` | | Memory for the successor, e.g. `128MB`, `4GB`. |
 | `kernel` | | Kernel image: an ELF vmlinux, or a bzImage from which the vmlinux is extracted; an Image on arm64. |
@@ -273,6 +272,9 @@ headroom for the kernel's own use, its devices, and the serial device when
 `console` is set. If a pool exists, kmorph uses it and adds any configured
 PCI device the pool lacks. It then creates the instance, loads the kernel
 and the image with the config appended to it, and boots the successor. The
+instance is named after the generation it starts: a host's successor is
+`generation-1`, and a kernel that is `generation-N` arms
+`generation-N+1`, so each kernel finds the successor it armed. The
 config is appended as a second cpio archive the kernel unpacks after the
 first, so the successor always boots with the config arm just read. arm
 warns when the image is older than a file it was built from. The whole
@@ -285,7 +287,7 @@ returning its resources to the pool.
 daemon's own state:
 
 ```
-successor: active (instance successor, id 1)
+successor: active (instance generation-1, id 1)
 kmorphd: ARMED predecessor=alive last_probe=12ms error=0
 ```
 

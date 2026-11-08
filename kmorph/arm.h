@@ -47,7 +47,8 @@ bool arm_memory_fits(uint64_t memory, size_t image_len);
  */
 int arm_stale_source(const char *image, char *out, size_t len);
 
-int arm_run(const struct kmorph_config *cfg, const struct mkfs *fs, const struct arm_hooks *h);
-int disarm_run(const struct kmorph_config *cfg, const struct mkfs *fs, const struct arm_hooks *h);
+int arm_run(const struct kmorph_config *cfg, const char *name, const struct mkfs *fs,
+	    const struct arm_hooks *h);
+int disarm_run(const char *name, const struct mkfs *fs, const struct arm_hooks *h);
 
 #endif

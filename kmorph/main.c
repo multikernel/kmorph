@@ -11,6 +11,7 @@
 #include <unistd.h>
 
 #include "kmorph/config.h"
+#include "kmorph/devtree.h"
 #include "kmorph/log.h"
 #include "kmorph/mkfs.h"
 #include "kmorph/request.h"
@@ -30,21 +31,21 @@ static int ask_daemon(unsigned int cid, struct status_reply *reply)
 	return ret ? ret : request_parse_status(line, reply);
 }
 
-static int status_run(const struct kmorph_config *cfg, const struct mkfs *fs)
+static int status_run(const char *name, const struct mkfs *fs)
 {
 	struct status_reply reply;
 	char status[32];
 	uint32_t id;
 	int ret;
 
-	ret = mkfs_instance_id(fs, cfg->name, &id);
+	ret = mkfs_instance_id(fs, name, &id);
 	if (ret) {
 		printf("successor: not armed\n");
 		return 1;
 	}
-	if (mkfs_instance_status(fs, cfg->name, status, sizeof(status)))
+	if (mkfs_instance_status(fs, name, status, sizeof(status)))
 		snprintf(status, sizeof(status), "unknown");
-	printf("successor: %s (instance %s, id %u)\n", status, cfg->name, id);
+	printf("successor: %s (instance %s, id %u)\n", status, name, id);
 
 	ret = ask_daemon(id, &reply);
 	if (ret) {
@@ -112,7 +113,7 @@ int main(int argc, char **argv)
 	struct kmorph_config cfg;
 	struct mkfs fs = { MKFS_ROOT };
 	const char *config_path = KMORPH_CONFIG_PATH, *verb;
-	char err[128];
+	char err[128], name[32];
 	int c, ret;
 
 	while ((c = getopt_long(argc, argv, "c:", opts, NULL)) != -1) {
@@ -136,19 +137,20 @@ int main(int argc, char **argv)
 		log_err("cannot mount %s: %s", fs.root, strerror(-ret));
 		return 1;
 	}
+	devtree_successor_name(DEVTREE_ROOT, name, sizeof(name));
 
 	if (!strcmp(verb, "init"))
 		ret = init_run(&cfg);
 	else if (!strcmp(verb, "arm"))
-		ret = arm_run(&cfg, &fs, &arm_default_hooks);
+		ret = arm_run(&cfg, name, &fs, &arm_default_hooks);
 	else if (!strcmp(verb, "disarm"))
-		ret = disarm_run(&cfg, &fs, &arm_default_hooks);
+		ret = disarm_run(name, &fs, &arm_default_hooks);
 	else if (!strcmp(verb, "status"))
-		ret = status_run(&cfg, &fs);
+		ret = status_run(name, &fs);
 	else if (!strcmp(verb, "upgrade"))
-		ret = upgrade_run(&cfg, &fs);
+		ret = upgrade_run(&cfg, name, &fs);
 	else if (!strcmp(verb, "watch"))
-		ret = watch_run(&cfg, &fs);
+		ret = watch_run(&cfg, name, &fs);
 	else
 		usage();
 

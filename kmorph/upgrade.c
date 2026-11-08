@@ -32,18 +32,18 @@ static int freeze_filesystems(struct freeze_set *set)
 	return ret;
 }
 
-int upgrade_run(const struct kmorph_config *cfg, const struct mkfs *fs)
+int upgrade_run(const struct kmorph_config *cfg, const char *name, const struct mkfs *fs)
 {
 	char other[64], reply[128], reason[96];
 	struct freeze_set frozen;
 	uint32_t id;
 	int ret;
 
-	if (mkfs_instance_id(fs, cfg->name, &id)) {
-		log_err("upgrade: %s is not armed", cfg->name);
+	if (mkfs_instance_id(fs, name, &id)) {
+		log_err("upgrade: %s is not armed", name);
 		return -ENOENT;
 	}
-	ret = mkfs_other_running(fs, cfg->name, other, sizeof(other));
+	ret = mkfs_other_running(fs, name, other, sizeof(other));
 	if (ret > 0) {
 		log_err("upgrade: %s runs under this kernel too and would lose its host", other);
 		return -EBUSY;
@@ -67,7 +67,7 @@ int upgrade_run(const struct kmorph_config *cfg, const struct mkfs *fs)
 	log_info("upgrade: froze %zu filesystems", frozen.count);
 	ret = client_request(id, "handover\n", REQUEST_TIMEOUT_MS, reply, sizeof(reply));
 	if (ret) {
-		log_err("upgrade: no answer from kmorphd in %s: %s", cfg->name, strerror(-ret));
+		log_err("upgrade: no answer from kmorphd in %s: %s", name, strerror(-ret));
 		goto thaw;
 	}
 	ret = request_parse_handover(reply, reason, sizeof(reason));

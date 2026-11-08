@@ -8,6 +8,6 @@
  * Hand the machine to the armed successor. Returns only on failure, with
  * this kernel still host.
  */
-int upgrade_run(const struct kmorph_config *cfg, const struct mkfs *fs);
+int upgrade_run(const struct kmorph_config *cfg, const char *name, const struct mkfs *fs);
 
 #endif

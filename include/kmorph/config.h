@@ -12,7 +12,6 @@
 
 struct kmorph_config {
 	/* Successor to arm (predecessor side) */
-	char *name;
 	struct cpulist cpus;
 	uint64_t memory;
 	char *kernel;

@@ -10,7 +10,6 @@
 static void config_defaults(struct kmorph_config *c)
 {
 	memset(c, 0, sizeof(*c));
-	c->name = strdup("successor");
 	c->probe_interval_ms = 100;
 	c->probe_timeouts = 5;
 	c->fence_retries = 3;
@@ -55,8 +54,6 @@ static int set_bool(bool *dst, const char *value)
 
 static int config_set(struct kmorph_config *c, const char *key, const char *value)
 {
-	if (!strcmp(key, "name"))
-		return *value ? set_string(&c->name, value) : -EINVAL;
 	if (!strcmp(key, "cpus")) {
 		cpulist_free(&c->cpus);
 		return *value ? parse_cpulist(value, &c->cpus) : 0;
@@ -154,8 +151,6 @@ int config_parse(const char *text, struct kmorph_config *c, char *err, size_t er
 	int lineno = 0, ret = 0;
 
 	config_defaults(c);
-	if (!c->name)
-		return -ENOMEM;
 	if (errlen)
 		err[0] = '\0';
 
@@ -202,7 +197,6 @@ int config_load(const char *path, struct kmorph_config *c, char *err, size_t err
 
 void config_free(struct kmorph_config *c)
 {
-	free(c->name);
 	cpulist_free(&c->cpus);
 	free(c->kernel);
 	free(c->initrd);

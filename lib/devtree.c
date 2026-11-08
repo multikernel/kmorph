@@ -30,6 +30,21 @@ bool devtree_has_host_tree(const char *root)
 	return stat(path, &st) == 0 && S_ISDIR(st.st_mode);
 }
 
+void devtree_successor_name(const char *root, char *buf, size_t len)
+{
+	char path[PATH_MAX], *self;
+	unsigned int gen = 0;
+	int end = 0;
+
+	prop_path(path, sizeof(path), root, "model");
+	if (devtree_has_host_tree(root) && !file_read_string(path, &self)) {
+		if (sscanf(self, "generation-%u%n", &gen, &end) != 1 || self[end])
+			gen = 0;
+		free(self);
+	}
+	snprintf(buf, len, "generation-%u", gen + 1);
+}
+
 static int read_cpulist_prop(const char *root, const char *rel, struct cpulist *out)
 {
 	char path[PATH_MAX];

@@ -43,7 +43,7 @@ static void populate_successor_tree(void)
 	snprintf(path, sizeof(path), "%s/chosen/multikernel,host-tree", root);
 	mkdir(path, 0755);
 
-	put("model", "successor", 10);
+	put("model", "generation-3", 13);
 	put("id", &id, sizeof(id));
 	put_u64s("resources/cpus", own, 2);
 	put_u64s("chosen/multikernel,reserved-memory", reserved, 4);
@@ -57,7 +57,7 @@ static void reads_identity_cpus_and_reserved(void)
 	populate_successor_tree();
 	CHECK(devtree_has_host_tree(root));
 	CHECK_EQ(devtree_read_self(root, &s), 0);
-	CHECK_STREQ(s.name, "successor");
+	CHECK_STREQ(s.name, "generation-3");
 	CHECK_EQ(s.id, 7);
 	CHECK_EQ(s.own_cpus.count, 2);
 	CHECK_EQ(s.own_cpus.ids[1], 5);
@@ -79,11 +79,37 @@ static void host_tree_absence_is_detected(void)
 	CHECK(!devtree_has_host_tree(root));
 }
 
+static void a_successor_arms_the_next_generation(void)
+{
+	char name[32];
+
+	populate_successor_tree();
+	devtree_successor_name(root, name, sizeof(name));
+	CHECK_STREQ(name, "generation-4");
+	put("model", "generation-3x", 14);
+	devtree_successor_name(root, name, sizeof(name));
+	CHECK_STREQ(name, "generation-1");
+	put("model", "generation-3", 13);
+}
+
+/* A firmware tree's model names the board, not a generation. */
+static void a_host_arms_generation_one(void)
+{
+	char name[32];
+
+	devtree_successor_name(root, name, sizeof(name));
+	CHECK_STREQ(name, "generation-1");
+	devtree_successor_name("/nonexistent", name, sizeof(name));
+	CHECK_STREQ(name, "generation-1");
+}
+
 TEST_MAIN({
 	if (!mkdtemp(root)) {
 		perror("mkdtemp");
 		return 1;
 	}
 	RUN(reads_identity_cpus_and_reserved);
+	RUN(a_successor_arms_the_next_generation);
 	RUN(host_tree_absence_is_detected);
+	RUN(a_host_arms_generation_one);
 })

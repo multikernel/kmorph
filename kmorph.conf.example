@@ -28,9 +28,6 @@ memory  = 128MB
 # a framebuffer, a USB bus). It adopts every other device at the takeover.
 #devices = enp9s0
 
-# Instance name in /sys/fs/multikernel/instances.
-#name = successor
-
 # Every CPU on the machine. Set only on a machine with neither ACPI nor
 # a firmware device tree.
 #machine_cpus = 0-3
