@@ -617,8 +617,9 @@ static void restore_routes(const struct netsnap_env *env, const struct netsnap_l
 
 int netsnap_apply(const struct netsnap_env *env, const struct netsnap *s, bool *restored)
 {
+	char done[768] = "";
+	size_t i, j, len = 0;
 	int up = 0;
-	size_t i, j;
 
 	for (i = 0; i < s->count; i++) {
 		const struct netsnap_link *l = &s->links[i];
@@ -647,11 +648,15 @@ int netsnap_apply(const struct netsnap_env *env, const struct netsnap *s, bool *
 					 strerror(-ret));
 		}
 		restore_routes(env, l, ifindex);
-		log_info("network: %s on %s restored with %zu addresses and %zu routes",
-			 l->name, l->pci, l->naddrs, l->nroutes);
+		if (len < sizeof(done))
+			len += snprintf(done + len, sizeof(done) - len, "%s%s on %s (%zu addresses, %zu routes)",
+					up ? ", " : "", l->name, l->pci, l->naddrs, l->nroutes);
 		if (restored)
 			restored[i] = true;
 		up++;
 	}
+	/* One line however many NICs: takeover lines share the /dev/kmsg ratelimit */
+	if (up)
+		log_info("network: restored %s", done);
 	return up;
 }

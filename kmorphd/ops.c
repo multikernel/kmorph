@@ -93,8 +93,6 @@ int ops_fence(struct ops *o)
 
 	if (ret)
 		log_err("fence of the predecessor failed: %s", strerror(-ret));
-	else
-		log_info("predecessor fenced");
 	return ret;
 }
 
@@ -138,8 +136,6 @@ static int keep_for_pool(struct ops *o, uint64_t granule)
 		c->size = 0;
 		return 0;
 	}
-	log_info("%llu MB at %#llx kept for the next pool",
-		 (unsigned long long)c->size >> 20, (unsigned long long)c->base);
 	return rangeset_subtract(&o->adoptable, c->base, c->size);
 }
 
@@ -171,17 +167,12 @@ static int plan_adoption(struct ops *o)
 		log_err("cannot align to the memory granule: %s", strerror(-ret));
 		return ret;
 	}
-	log_info("takeable: %zu CPUs, %llu MB in %zu ranges, %llu MB adoptable in %zu ranges",
-		 o->takeable.cpus.count,
-		 (unsigned long long)rangeset_total(&o->takeable.memory) >> 20,
-		 o->takeable.memory.count,
-		 (unsigned long long)rangeset_total(&o->adoptable) >> 20,
-		 o->adoptable.count);
 	return 0;
 }
 
 static int apply_adopt(struct ops *o, const struct cpulist *cpus, const struct rangeset *memory)
 {
+	unsigned long long mb, takeable_mb;
 	void *dtbo;
 	size_t len;
 	int tx, ret;
@@ -191,12 +182,21 @@ static int apply_adopt(struct ops *o, const struct cpulist *cpus, const struct r
 		return ret;
 	ret = mkfs_apply_overlay(&o->fs, dtbo, len, &tx);
 	free(dtbo);
-	if (ret)
+	if (ret) {
 		log_err("adopt overlay failed (tx %d): %s", tx, strerror(-ret));
+		return ret;
+	}
+	mb = rangeset_total(memory) >> 20;
+	takeable_mb = rangeset_total(&o->takeable.memory) >> 20;
+	if (mb && o->pool_claim.size)
+		log_info("adopted %zu CPUs and %llu of %llu MB (tx %d), %llu MB at %#llx kept for the next pool",
+			 cpus->count, mb, takeable_mb, tx,
+			 (unsigned long long)o->pool_claim.size >> 20,
+			 (unsigned long long)o->pool_claim.base);
 	else
-		log_info("adopted %zu CPUs and %llu MB (tx %d)", cpus->count,
-			 (unsigned long long)rangeset_total(memory) >> 20, tx);
-	return ret;
+		log_info("adopted %zu CPUs and %llu of %llu MB (tx %d)", cpus->count, mb,
+			 takeable_mb, tx);
+	return 0;
 }
 
 static int adopt_device(struct ops *o, const char *id)

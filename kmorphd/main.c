@@ -141,13 +141,11 @@ static void on_state(struct takeover *t, enum takeover_state state)
 static void deliver_probe(struct daemon *d, int err)
 {
 	enum probe_result r = probe_classify(err);
+	enum takeover_state before = d->tk.state;
+	bool changed = r != d->last_result || !d->probe_reported ||
+		       (r == PROBE_ERROR && err != d->last_probe_err);
 
-	if (r != d->last_result || !d->probe_reported ||
-	    (r == PROBE_ERROR && err != d->last_probe_err)) {
-		if (r == PROBE_ERROR)
-			log_warn("probe failed locally: %s", strerror(err));
-		else
-			log_info("predecessor %s", probe_result_name(r));
+	if (changed) {
 		d->last_result = r;
 		d->probe_reported = true;
 		write_state_file(d);
@@ -158,6 +156,17 @@ static void deliver_probe(struct daemon *d, int err)
 		takeover_handle(&d->tk, TK_EV_PROBE_ALIVE);
 	else if (r == PROBE_SILENT)
 		takeover_handle(&d->tk, TK_EV_PROBE_SILENT);
+
+	/*
+	 * The kernel drops /dev/kmsg lines past ten in five seconds, which a
+	 * takeover nears, so a result the new state already tells is not logged.
+	 */
+	if (!changed)
+		return;
+	if (r == PROBE_ERROR)
+		log_warn("probe failed locally: %s", strerror(err));
+	else if (d->tk.state == before)
+		log_info("predecessor %s", probe_result_name(r));
 }
 
 static int epoll_add(int epfd, int fd, uint32_t events)
