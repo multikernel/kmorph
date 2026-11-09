@@ -26,6 +26,7 @@
 #include "kmorph/uart.h"
 #include "kmorph/vmlinux.h"
 #include "arm.h"
+#include "image.h"
 
 static int net_snapshot(const struct strlist *skip, char **text)
 {
@@ -51,7 +52,7 @@ const struct arm_hooks arm_default_hooks = {
 	.vmcoreinfo_path = VMCOREINFO_PATH,
 	.cpu_root = CPU_SYSFS_ROOT,
 	.kcore_path = KCORE_PATH,
-	.default_initrd = KMORPH_INITRD_PATH,
+	.load_image = image_load,
 	.class_root = DEVNAME_CLASS_ROOT,
 	.cmdline_path = "/proc/cmdline",
 	.usb_root = DEVNAME_USB_ROOT,
@@ -599,26 +600,6 @@ static int add_network(const struct kmorph_config *cfg, const struct arm_hooks *
 	return ret;
 }
 
-int arm_stale_source(const char *image, char *out, size_t len)
-{
-	char manifest[PATH_MAX], *list, *line, *save;
-	struct stat img, st;
-	int stale = 0;
-
-	if (snprintf(manifest, sizeof(manifest), "%s.files", image) >= (int)sizeof(manifest) ||
-	    stat(image, &img) < 0 || file_read_string(manifest, &list))
-		return 0;
-	for (line = strtok_r(list, "\n", &save); line; line = strtok_r(NULL, "\n", &save)) {
-		if (!lstat(line, &st) && st.st_mtime > img.st_mtime) {
-			snprintf(out, len, "%s", line);
-			stale = 1;
-			break;
-		}
-	}
-	free(list);
-	return stale;
-}
-
 /*
  * The image, then the one thing only arm knows: the config. The kernel
  * takes a cpio header only at a 4-byte aligned offset and skips zeros
@@ -627,22 +608,19 @@ int arm_stale_source(const char *image, char *out, size_t len)
 static int successor_initrd(const struct kmorph_config *cfg, const struct arm_hooks *h)
 {
 	static const char zeros[3];
-	const char *path = cfg->initrd ? cfg->initrd : h->default_initrd;
 	struct cpio extra = CPIO_INIT;
-	char stale[PATH_MAX];
 	void *image;
 	size_t len;
 	int fd, ret;
 
-	ret = file_read(path, &image, &len);
-	if (ret) {
-		log_err("cannot read successor image %s: %s%s", path, strerror(-ret),
-			cfg->initrd ? "" : "; kmorph-mkimage builds it");
+	if (cfg->initrd) {
+		ret = file_read(cfg->initrd, &image, &len);
+		if (ret)
+			log_err("cannot read successor image %s: %s", cfg->initrd, strerror(-ret));
+	} else
+		ret = h->load_image(&image, &len);
+	if (ret)
 		return ret;
-	}
-	if (arm_stale_source(path, stale, sizeof(stale)))
-		log_warn("%s changed since %s was built; its standby services run the old "
-			 "version until rebuilt with kmorph-mkimage", stale, path);
 	if (!arm_memory_fits(cfg->memory, len))
 		log_warn("memory = %llu MB may not hold the %zu MB image once unpacked",
 			 (unsigned long long)cfg->memory >> 20, len >> 20);

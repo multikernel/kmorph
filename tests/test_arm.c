@@ -1,7 +1,6 @@
 #include <elf.h>
 #include <stdlib.h>
 #include <sys/stat.h>
-#include <sys/time.h>
 #include <unistd.h>
 
 #include "test.h"
@@ -68,6 +67,11 @@ static int fake_exec(int mk_id) { record('E'); calls.exec_id = mk_id; return 0; 
 static int fake_halt(int mk_id) { record('H'); calls.halt_id = mk_id; return 0; }
 static int fake_unload(int mk_id) { record('U'); calls.unloaded_id = mk_id; return 0; }
 
+static int fake_load_image(void **image, size_t *len)
+{
+	return file_read(image_path, image, len);
+}
+
 static const struct arm_hooks hooks = {
 	.open_kernel = fake_open_kernel,
 	.kexec_load = fake_kexec_load,
@@ -81,7 +85,7 @@ static const struct arm_hooks hooks = {
 	.vmcoreinfo_path = vmcoreinfo_path,
 	.cpu_root = cpu_root,
 	.kcore_path = kcore_path,
-	.default_initrd = image_path,
+	.load_image = fake_load_image,
 	.class_root = class_root,
 	.cmdline_path = own_cmdline,
 	.usb_root = usb_root,
@@ -1150,33 +1154,6 @@ static void memory_must_hold_three_times_the_image(void)
 	CHECK(!arm_memory_fits(2, 1));
 }
 
-static void a_source_newer_than_the_image_is_reported(void)
-{
-	char manifest[PATH_MAX], src[PATH_MAX], other[PATH_MAX], list[2 * PATH_MAX + 2], out[PATH_MAX];
-	struct timeval old[2] = { { 1000, 0 }, { 1000, 0 } }, newer[2] = { { 2000, 0 }, { 2000, 0 } };
-
-	snprintf(manifest, sizeof(manifest), "%s.files", image_path);
-	snprintf(src, sizeof(src), "%s/nginx", sysfs);
-	snprintf(other, sizeof(other), "%s/nginx.conf", sysfs);
-	put_image();
-	CHECK_EQ(arm_stale_source(image_path, out, sizeof(out)), 0);
-
-	CHECK_EQ(file_write(src, "x", 1), 0);
-	CHECK_EQ(file_write(other, "x", 1), 0);
-	snprintf(list, sizeof(list), "%s\n%s\n", src, other);
-	CHECK_EQ(file_write(manifest, list, strlen(list)), 0);
-	CHECK_EQ(utimes(image_path, newer), 0);
-	CHECK_EQ(utimes(src, old), 0);
-	CHECK_EQ(utimes(other, old), 0);
-	CHECK_EQ(arm_stale_source(image_path, out, sizeof(out)), 0);
-
-	CHECK_EQ(utimes(image_path, old), 0);
-	CHECK_EQ(utimes(src, newer), 0);
-	CHECK_EQ(arm_stale_source(image_path, out, sizeof(out)), 1);
-	CHECK_STREQ(out, src);
-	unlink(manifest);
-}
-
 static char snapshot_skipped[32];
 
 static int fake_net_snapshot(const struct strlist *skip, char **text)
@@ -1263,6 +1240,5 @@ TEST_MAIN({
 	RUN(disarm_of_a_loaded_instance_skips_the_halt);
 	RUN(disarm_of_a_bare_instance_only_removes_it);
 	RUN(disarm_halts_then_removes_the_instance);
-	RUN(a_source_newer_than_the_image_is_reported);
 	RUN(arm_hands_the_network_identity_to_the_successor);
 })

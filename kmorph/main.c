@@ -16,6 +16,7 @@
 #include "kmorph/request.h"
 #include "arm.h"
 #include "client.h"
+#include "image.h"
 #include "upgrade.h"
 #include "watch.h"
 
@@ -29,13 +30,14 @@ static int ask_daemon(unsigned int cid, struct status_reply *reply)
 	return ret ? ret : request_parse_status(line, reply);
 }
 
-static int status_run(const char *name, const struct mkfs *fs)
+static int status_run(const struct kmorph_config *cfg, const char *name, const struct mkfs *fs)
 {
 	struct status_reply reply;
 	char status[32];
 	uint32_t id;
 	int ret;
 
+	image_describe(cfg, stdout);
 	ret = mkfs_instance_id(fs, name, &id);
 	if (ret) {
 		printf("successor: not armed\n");
@@ -56,9 +58,11 @@ static int status_run(const char *name, const struct mkfs *fs)
 	return 0;
 }
 
+static const char *const verbs[] = { "image", "arm", "disarm", "status", "upgrade", "watch" };
+
 static void usage(void)
 {
-	fprintf(stderr, "usage: kmorph <arm|disarm|status|upgrade|watch> [--config PATH]\n");
+	fprintf(stderr, "usage: kmorph <image|arm|disarm|status|upgrade|watch> [--config PATH]\n");
 	exit(2);
 }
 
@@ -83,12 +87,21 @@ int main(int argc, char **argv)
 	if (optind + 1 != argc)
 		usage();
 	verb = argv[optind];
+	for (c = 0; c < (int)(sizeof(verbs) / sizeof(verbs[0])) && strcmp(verb, verbs[c]); c++)
+		;
+	if (c == (int)(sizeof(verbs) / sizeof(verbs[0])))
+		usage();
 
 	log_init("kmorph", STDERR_FILENO, -1);
 	ret = config_load(config_path, &cfg, err, sizeof(err));
 	if (ret) {
 		log_err("config: %s", err);
 		return 1;
+	}
+	setenv(KMORPH_CONF_ENV, config_path, 1);
+	if (!strcmp(verb, "image")) {
+		ret = image_run(&cfg);
+		goto out;
 	}
 	ret = mkfs_mount(&fs);
 	if (ret) {
@@ -102,14 +115,12 @@ int main(int argc, char **argv)
 	else if (!strcmp(verb, "disarm"))
 		ret = disarm_run(name, &fs, &arm_default_hooks);
 	else if (!strcmp(verb, "status"))
-		ret = status_run(name, &fs);
+		ret = status_run(&cfg, name, &fs);
 	else if (!strcmp(verb, "upgrade"))
 		ret = upgrade_run(&cfg, name, &fs);
-	else if (!strcmp(verb, "watch"))
-		ret = watch_run(&cfg, name, &fs);
 	else
-		usage();
-
+		ret = watch_run(&cfg, name, &fs);
+out:
 	config_free(&cfg);
 	return ret ? 1 : 0;
 }

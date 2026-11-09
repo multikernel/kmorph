@@ -1,8 +1,9 @@
 #!/bin/bash
-# Rebuild the successor image for the kernel just installed and point
-# the kmorph config at it, so the successor keeps up with kernel
-# updates. Runs as a kernel-install plugin (add|remove VERSION ...) and
-# as a Debian kernel postinst hook (VERSION IMAGE). Only the kernel key
+# Point the kmorph config at the kernel just installed and rebuild the
+# successor image for it, so the successor keeps up with kernel updates
+# and the next arm need not build the image itself. Runs as a
+# kernel-install plugin (add|remove VERSION ...) and as a Debian kernel
+# postinst hook (VERSION IMAGE). Only the kernel key
 # is touched; the rest is the operator's.
 CONF=/etc/kmorph/kmorph.conf
 
@@ -27,4 +28,4 @@ set_key() {
 }
 
 set_key kernel "$KERNEL"
-exec /usr/lib/kmorph/kmorph-mkimage "$KERNEL_VERSION"
+exec /usr/bin/kmorph image

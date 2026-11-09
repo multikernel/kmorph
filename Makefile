@@ -18,7 +18,7 @@ LDFLAGS += -static
 endif
 
 WARN     = -Wall -Wextra -Werror -Wshadow -Wmissing-prototypes
-CPPFLAGS = -D_GNU_SOURCE -Iinclude -Ilib/fdt
+CPPFLAGS = -D_GNU_SOURCE -Iinclude -Ilib/fdt -DKMORPH_MKIMAGE='"$(PREFIX)/lib/kmorph/kmorph-mkimage"'
 ALL_CFLAGS = -std=gnu11 $(CFLAGS) $(CPPFLAGS)
 
 BUILD = build
