@@ -14,6 +14,7 @@
 #include "kmorph/file.h"
 #include "kmorph/log.h"
 #include "kmorph/netsnap.h"
+#include "kmorph/pci.h"
 
 #define FIND_TIMEOUT_MS	3000
 #define FIND_POLL_MS	10
@@ -473,11 +474,18 @@ static int netdev_on(const char *pci, char *name, size_t len)
 	return ret;
 }
 
-/* The driver binds as the device is adopted, but may create its interface a little later. */
+/*
+ * The driver binds as the device is adopted, but may create its interface a little later.
+ * A function that is not on the bus was never adopted, and no interface will come for it.
+ */
 static int find_netdev(const char *pci, char *name, size_t len, int *ifindex)
 {
+	char dev[PATH_MAX];
 	unsigned int waited;
 
+	snprintf(dev, sizeof(dev), PCI_SYSFS_ROOT "/%s", pci);
+	if (access(dev, F_OK))
+		return -ENODEV;
 	for (waited = 0; waited <= FIND_TIMEOUT_MS; waited += FIND_POLL_MS) {
 		if (!netdev_on(pci, name, len)) {
 			*ifindex = if_nametoindex(name);
