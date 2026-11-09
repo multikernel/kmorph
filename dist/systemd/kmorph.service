@@ -4,7 +4,8 @@ After=local-fs.target
 ConditionPathExists=/etc/kmorph/kmorph.conf
 
 [Service]
-ExecStartPre=/usr/lib/kmorph/kmorph-mkimage --if-stale
+# arm builds a distro or standby image first when it is missing or stale.
+TimeoutStartSec=5min
 ExecStartPre=/usr/bin/kmorph arm
 ExecStart=/usr/bin/kmorph watch
 ExecStop=/usr/bin/kmorph disarm

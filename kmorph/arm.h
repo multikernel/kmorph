@@ -2,6 +2,7 @@
 #define KMORPH_ARM_H
 
 #include <stdbool.h>
+#include <stddef.h>
 #include <stdint.h>
 
 #include "kmorph/config.h"
@@ -22,7 +23,8 @@ struct arm_hooks {
 	const char *vmcoreinfo_path;	/* /sys/kernel/vmcoreinfo */
 	const char *cpu_root;		/* /sys/devices/system/cpu, for crash_notes */
 	const char *kcore_path;		/* /proc/kcore, for the direct-map base */
-	const char *default_initrd;	/* the image kmorph-mkimage wrote, when initrd is unset */
+	/* The image to load when initrd is unset; the caller frees it. */
+	int (*load_image)(void **image, size_t *len);
 	const char *class_root;		/* /sys/class, to resolve device names */
 	const char *cmdline_path;	/* /proc/cmdline, for the earlycon this kernel booted with */
 	const char *usb_root;		/* /sys/bus/usb/devices, for usbN names */
@@ -41,12 +43,6 @@ int arm_pool_add_devices(const struct kmorph_config *cfg, const struct mkfs *fs,
 
 /* An initramfs unpacks into the successor's RAM; three times its size is the floor. */
 bool arm_memory_fits(uint64_t memory, size_t image_len);
-
-/*
- * A standby image lists what it was built from in <image>.files; finds
- * the first of those changed since. Returns 1 with it in out, else 0.
- */
-int arm_stale_source(const char *image, char *out, size_t len);
 
 int arm_run(const struct kmorph_config *cfg, const char *name, const struct mkfs *fs,
 	    const struct arm_hooks *h);
