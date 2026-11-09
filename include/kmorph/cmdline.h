@@ -14,6 +14,7 @@ struct cmdline {
 int cmdline_split(const char *s, struct cmdline *out);
 void cmdline_free(struct cmdline *c);
 
+/* name may be a whole word, of which only the name counts. */
 bool cmdline_has(const struct cmdline *c, const char *name);
 void cmdline_remove(struct cmdline *c, const char *name);
 int cmdline_append(struct cmdline *c, const char *word);

@@ -531,7 +531,7 @@ static int successor_cmdline(const struct kmorph_config *cfg, const struct arm_h
 	if (!ret && cfg->cmdline)
 		ret = cmdline_split(cfg->cmdline, &mine);
 	for (i = 0; !ret && i < mine.count; i++)
-		cmdline_remove(&line, strndupa(mine.words[i], strcspn(mine.words[i], "=")));
+		cmdline_remove(&line, mine.words[i]);
 	for (i = 0; !ret && i < mine.count; i++)
 		ret = cmdline_append(&line, mine.words[i]);
 	if (!ret && cmdline_has(&line, "root"))

@@ -28,7 +28,8 @@ static void names_match_whole_and_before_the_equals(void)
 	CHECK(cmdline_has(&c, "mem"));
 	CHECK(cmdline_has(&c, "quiet"));
 	CHECK(!cmdline_has(&c, "me"));
-	cmdline_remove(&c, "mem");
+	CHECK(cmdline_has(&c, "quiet=1"));
+	cmdline_remove(&c, "mem=8G");
 	cmdline_remove(&c, "console");
 	s = cmdline_join(&c);
 	CHECK_STREQ(s, "memmap=1G$4G quiet");

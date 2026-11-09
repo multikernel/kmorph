@@ -11,7 +11,7 @@ static bool is_blank(char ch)
 
 static bool has_name(const char *word, const char *name)
 {
-	size_t n = strlen(name);
+	size_t n = strcspn(name, "=");
 
 	return !strncmp(word, name, n) && (word[n] == '\0' || word[n] == '=');
 }
