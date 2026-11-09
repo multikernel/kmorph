@@ -10,15 +10,18 @@
 # Kernel image: an ELF vmlinux or a bzImage; an Image on arm64.
 kernel  = /boot/vmlinuz
 
-# Initramfs for the successor. Default: the image 'kmorph init' writes.
-#initrd = /var/lib/kmorph/successor.img
+# An image of your own for the successor, loaded as it is. Unset: the
+# distro's initramfs with kmorphd, which kmorph arm builds with dracut or
+# mkinitramfs when it is missing or stale.
+#initrd = /boot/successor.img
 
 # CPUs for the successor, as physical ids (APIC ids on x86, MPIDRs on
 # arm64), e.g. 1 or 12-15,20.
 cpus    = 1
 
-# Memory for the successor, e.g. 128MB or 4GB.
-memory  = 128MB
+# Memory for the successor, e.g. 512MB or 4GB. It must hold the unpacked
+# successor image.
+memory  = 512MB
 
 # Parameters for the successor on top of this kernel's own command line,
 # which kmorph copies less what describes this kernel's own resources and
@@ -43,12 +46,12 @@ memory  = 128MB
 
 # Kernel modules the distro image builders add to the successor image,
 # comma separated: the vsock transport when it is a module, drivers for
-# devices handed to the successor. Ignored by the kmorph init image.
+# devices handed to the successor. Ignored with initrd.
 #modules = mk_transport
 
 # systemd units the successor runs before the takeover, from a standby
-# image kmorph-mkimage builds, so that they are already up when it
-# happens. They must start without the disk and the network.
+# image kmorph arm builds, so that they are already up when it happens.
+# They must start without the disk and the network.
 #standby = nginx.service
 
 # Further paths the standby image carries.

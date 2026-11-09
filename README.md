@@ -58,8 +58,9 @@ directly and needs no other tool.
   transport, built in or as modules the successor image carries, and the
   serial driver for the [console](#successor-console) built in, since
   earlycon comes up before any module.
-- On the predecessor: root, and `gzip`, `xz`, `zstd` or `lz4` if the kernel
-  image is a compressed bzImage rather than an ELF vmlinux.
+- On the predecessor: root, dracut or initramfs-tools for the successor
+  image unless `initrd` names one, and `gzip`, `xz`, `zstd` or `lz4` if the
+  kernel image is a compressed bzImage rather than an ELF vmlinux.
 - For [standby services](#standby-services): dracut and erofs-utils on the
   predecessor, and a successor kernel with `CONFIG_EROFS_FS=y` and
   `CONFIG_EROFS_FS_BACKED_BY_FILE=y`.
@@ -87,93 +88,57 @@ make CROSS_COMPILE=aarch64-linux-gnu- STATIC=1
 
 ## Getting started
 
-There are two ways to give the successor its image. The minimal image holds
-kmorphd alone, and is the quickest way to see a takeover. The distro image
-is the distro's own initramfs with kmorphd inside, which brings the
-machine's user space back after the takeover; it is the one to run in
-production.
+The package route is the one kdump uses. `make install PREFIX=/usr`
+installs, from `dist/`:
 
-### Minimal image
+- a dracut module and an initramfs-tools hook that put kmorphd into an
+  initramfs, used only for the successor's image, leaving the host's own
+  boot initramfs alone;
+- `kmorph.service`, which arms at boot, keeps the successor's
+  [network identity](#network-identity) current while armed, and disarms
+  on stop;
+- a kernel hook, for kernel-install and for Debian's `postinst.d`, that
+  points the `kernel` key at the kernel just installed and rebuilds the
+  successor image for it.
 
-1. Write `/etc/kmorph/kmorph.conf` on the predecessor:
+1. Write `/etc/kmorph/kmorph.conf`. The hook writes `kernel`; the
+   operator writes the remaining keys once:
 
    ```ini
    cpus    = 1
-   memory  = 128MB
-   kernel  = /boot/vmlinuz
+   memory  = 512MB
    devices = enp9s0
    console = ttyS0
-   console_login = /usr/local/lib/kmorph/sh
+   console_login = /bin/sh
    ```
 
-   The login program here is a static busybox copied under the name `sh`,
-   so that it runs as a shell. Without `console_login` the line still
-   shows the successor's kernel messages.
+   `memory` must hold the unpacked successor image; `kmorph arm` warns
+   when it cannot. Without `console_login` the line still shows the
+   successor's kernel messages.
 
-2. Build the successor image, once per kmorph install:
-
-   ```
-   # kmorph init
-   kmorph: successor image written to /var/lib/kmorph/successor.img (2563028 bytes)
-   ```
-
-   It holds kmorphd as the image's init and the login program. `kmorph arm`
-   adds the config to it each time, so the image never goes stale when the
-   config changes. The image has no module loader, so with it the
-   successor kernel needs its drivers built in.
-
-3. Arm on the predecessor and check:
+2. Arm, through the service or by hand, and check:
 
    ```
-   # kmorph arm
-   kmorph: pool initialised with the successor's resources
-   kmorph: host tree: 4 CPUs, 2047 MB in 2 ranges, 24 PCI devices
-   kmorph: instance generation-1 created with id 1
-   kmorph: successor generation-1 armed
+   # systemctl enable --now kmorph
    # kmorph status
+   image: distro, /var/lib/kmorph/successor.img built 2026-11-09 14:14, current
    successor: active (instance generation-1, id 1)
    kmorphd: ARMED predecessor=alive last_probe=123ms error=0
    ```
 
 From here the successor probes the predecessor ten times a second. If the
 predecessor dies, the successor takes over on its own. To stand down, run
-`kmorph disarm`.
+`kmorph disarm` or stop the service.
 
-### On a distro
+### The successor image
 
-The package route is the one kdump uses. `make install PREFIX=/usr`
-installs, from `dist/`:
-
-- a dracut module and an initramfs-tools hook that put kmorphd into an
-  initramfs;
-- `kmorph-mkimage`, which runs whichever of dracut or mkinitramfs the host
-  has to write `/var/lib/kmorph/successor.img`, leaving the host's own
-  boot initramfs alone;
-- `kmorph.service`, which builds the image if it is missing or stale, arms
-  at boot, keeps the successor's [network identity](#network-identity)
-  current while armed, and disarms on stop;
-- a kernel hook, for kernel-install and for Debian's `postinst.d`, that
-  rebuilds the image for the kernel just installed and points the `kernel`
-  key at it.
-
-The hook writes `kernel`; the operator writes the remaining keys once:
-
-```ini
-cpus    = 47
-memory  = 512MB
-console = ttyS0
-console_login = /bin/sh
-```
-
-and enables the service:
-
-```
-systemctl enable --now kmorph
-```
-
-`memory` must hold an unpacked distro initramfs; `kmorph arm` warns when it
-cannot. `console_login` needs no static program here, since the initramfs
-has libc. `kmorph init` is not involved.
+The successor boots the distro's own initramfs with kmorphd inside, kept at
+`/var/lib/kmorph/successor.img`. There is no build step to run: `kmorph
+arm` builds it with dracut or mkinitramfs, whichever the host has, when it
+is missing or stale, that is when it was built for another kernel or other
+`modules`, `standby` or `standby_files`, or when kmorphd or another file it
+was built from has changed since. The config is appended at every arm, so
+changing it never leaves the image stale.
 
 In the successor, the initramfs's init starts kmorphd and holds its boot on
 `kmorphd --wait` until the takeover is done. The successor has then adopted
@@ -183,10 +148,21 @@ services back as at any boot: the machine continues as itself, its user
 space restarted on a kernel already running. That init starts
 `kmorph.service` too, which arms the next successor.
 
+With `standby` set, the image is a standby root instead, which starts the
+named services while the successor is armed; see
+[Standby services](#standby-services).
+
+`initrd` names an image of the operator's own, for a host without dracut
+or mkinitramfs, or for testing. kmorph loads it as it is, with the config
+and the network identity appended. Its init must be kmorphd, or start
+kmorphd and hold its boot on `kmorphd --wait` until the takeover, and it
+must carry the modules the successor kernel needs and the `console_login`
+program.
+
 ## Upgrading the kernel
 
 `kmorph upgrade` hands the machine to the armed successor while the
-predecessor is healthy. On a distro, the whole upgrade is:
+predecessor is healthy. The whole upgrade is:
 
 ```
 # dnf upgrade kernel           # or apt; the kernel hook rebuilds the image
@@ -224,17 +200,17 @@ else has a default. `kmorph.conf.example` lists every key.
 | `cpus` | | CPUs for the successor, as physical ids the kernel uses (APIC ids on x86, MPIDRs on arm64), e.g. `1` or `12-15,20`. |
 | `memory` | | Memory for the successor, e.g. `128MB`, `4GB`. |
 | `kernel` | | Kernel image: an ELF vmlinux, or a bzImage from which the vmlinux is extracted; an Image on arm64. |
-| `initrd` | `/var/lib/kmorph/successor.img` | Initramfs for the successor; the default is where `kmorph init` and `kmorph-mkimage` write. kmorph appends the config to whichever image is used. |
+| `initrd` | | An image of the operator's own, loaded as it is in place of the one kmorph builds. See [The successor image](#the-successor-image). |
 | `cmdline` | | Parameters for the successor on top of this kernel's own command line, which kmorph copies less the parameters about this kernel's own resources and boot: `BOOT_IMAGE`, `initrd`, `crashkernel`, `mem`, `memmap`, `cma`, `kernelcore`, `movablecore`, the hugepage sizes and counts, the CPU lists such as `isolcpus` and `nohz_full`, `maxcpus`, `nr_cpus`, `possible_cpus`, the consoles and `resume`. A parameter here replaces the copied ones of the same name. With `root` in the result, kmorph adds `rd.retry`, `rd.timeout` and `rootdelay` values that keep the initramfs waiting for the root disk until the takeover; with `console` set, an earlycon for it, see [Successor console](#successor-console); with `dump` set, `iomem=relaxed`. `kmorph arm` prints the result. |
 | `cmdline_drop` | | Further parameter names left out of the copy, comma separated. `*` copies nothing, so that `cmdline` is the whole command line. |
 | `devices` | | Devices handed to the successor, comma separated, as PCI addresses (`0000:09:00.0`) or as the names sysfs knows them by: a network interface (`enp61s0f1`), a block device (`nvme0n1`), a framebuffer (`fb0`), a USB bus (`usb1`). A name resolves to the PCI function behind it. The successor owns these from boot, a NIC to be reachable while armed for instance; it adopts every other device at the takeover. |
 | `machine_cpus` | from the firmware | Every CPU on the machine. Set only on a machine with neither ACPI nor a firmware device tree. |
-| `modules` | | Kernel modules the distro image builders add to the successor image, comma separated: the vsock transport when it is a module, drivers for devices in `devices`. Ignored by the `kmorph init` image, which has no module loader. |
+| `modules` | | Kernel modules the distro image builders add to the successor image, comma separated: the vsock transport when it is a module, drivers for devices in `devices`. Ignored with `initrd`, whose image carries its own. |
 | `standby` | | systemd units the successor runs before the takeover, comma separated. See [Standby services](#standby-services). |
 | `standby_files` | | Further files or directories the standby image carries, such as plugins from a package other than the unit's. |
 | `console` | | Serial line that shows the successor's kernel messages, e.g. `ttyS0` or `ttyAMA0`. |
 | `console_baud` | `115200` | Speed of that line. |
-| `console_login` | | Program run on that line after the takeover; needs an 8250 UART. Unset: no login. With the `kmorph init` image it must be a static executable, which `kmorph init` copies in; any other image carries its own. |
+| `console_login` | | Program run on that line after the takeover; needs an 8250 UART. Unset: no login. The image must carry it; the one kmorph builds does. |
 
 ### Detection and takeover (used by kmorphd)
 
@@ -251,7 +227,7 @@ else has a default. `kmorph.conf.example` lists every key.
 ### kmorph, on the predecessor
 
 ```
-kmorph init    [--config PATH]
+kmorph image   [--config PATH]
 kmorph arm     [--config PATH]
 kmorph disarm  [--config PATH]
 kmorph status  [--config PATH]
@@ -259,35 +235,34 @@ kmorph watch   [--config PATH]
 kmorph upgrade [--config PATH]
 ```
 
-**init** writes the minimal successor image, `/var/lib/kmorph/successor.img`:
-an initramfs holding the kmorphd installed beside kmorph as its init and,
-when `console_login` is set, that program at its own path. Both
-must be static executables, since the image has no libc; init refuses a
-dynamic one. Run it once after installing kmorph and again after upgrading
-it or changing `console_login`. The config is not in the image.
+**image** rebuilds the successor image. `kmorph arm` builds it when it is
+missing or stale, so there is rarely a need to run it; the kernel hook
+does, so that the first arm on a new kernel need not wait for the build.
+With `initrd` set it does nothing.
 
 **arm** prepares the machine and boots the successor. If the machine has no
 multikernel pool yet, kmorph mounts `/sys/fs/multikernel` and creates a
 pool holding the successor's CPUs, its memory plus one memory granule of
 headroom for the kernel's own use, its devices, and the serial device when
 `console_login` is set. If a pool exists, kmorph uses it and adds any configured
-PCI device the pool lacks. It then creates the instance, loads the kernel
-and the image with the config appended to it, and boots the successor. The
+PCI device the pool lacks. It then creates the instance, builds the image
+when it is missing or stale, loads the kernel and the image with the config
+appended to it, and boots the successor. The
 instance is named after the generation it starts: a host's successor is
 `generation-1`, and a kernel that is `generation-N` arms
 `generation-N+1`, so each kernel finds the successor it armed. The
 config is appended as a second cpio archive the kernel unpacks after the
-first, so the successor always boots with the config arm just read. arm
-warns when the image is older than a file it was built from. The whole
-command takes about a second.
+first, so the successor always boots with the config arm just read. With
+the image already built, the whole command takes about a second.
 
 **disarm** halts the successor, unloads its image and removes the instance,
 returning its resources to the pool.
 
-**status** prints the instance state from the kernel and, over vsock, the
-daemon's own state:
+**status** prints the image arm loads and whether it is current, the
+instance state from the kernel and, over vsock, the daemon's own state:
 
 ```
+image: distro, /var/lib/kmorph/successor.img built 2026-11-09 14:14, current
 successor: active (instance generation-1, id 1)
 kmorphd: ARMED predecessor=alive last_probe=12ms error=0
 ```
@@ -306,8 +281,8 @@ kmorphd [--config PATH] [--foreground | --wait]
 ```
 
 kmorphd refuses to run in a kernel that was not armed by kmorph, since it
-finds nothing to take over. As the image's init, which is how `kmorph init`
-packs it, it mounts proc, sysfs, devtmpfs and a tmpfs on `/run`, stays in
+finds nothing to take over. As the image's init, which is how the standby
+image runs it, it mounts proc, sysfs, devtmpfs and a tmpfs on `/run`, stays in
 the foreground and reaps orphans. Started by another init it daemonises
 unless `--foreground` is given; with `--wait` the command returns only once
 the takeover is done, or fails when kmorphd stops before, so that an
@@ -337,7 +312,7 @@ the successor while it is armed, and keep running through the takeover:
 standby = nginx.service
 ```
 
-`kmorph-mkimage` then writes a different image: a standby root, built with
+`kmorph arm` then builds a standby image: a standby root, built with
 dracut from the host's own files, holding systemd, each unit with its
 drop-ins, its programs and their libraries, everything the packages of the
 unit and its main program ship, `/etc`, and `standby_files`, packed as an
@@ -365,15 +340,15 @@ Constraints:
   service should not be one that does.
 - A unit that runs in a mount namespace of its own (`PrivateTmp=`,
   `ProtectSystem=` and the like) is not reached by `pivot_root`.
-  `kmorph-mkimage` warns about it and `kmorph-switch` restarts it after the
+  the image build warns about it and `kmorph-switch` restarts it after the
   takeover, which costs it the warm start unless a drop-in relaxes its
   sandbox.
 - The root must be a plain partition or disk with `/usr` on it.
 - `memory` must hold the image and what the standby services use.
 
-The image is a snapshot: `kmorph-mkimage` records the files it copied in
-`successor.img.files`, `kmorph.service` rebuilds the image when one of
-them changes, and `kmorph arm` warns about a stale image.
+The image is a snapshot of the files it copied, which it records in
+`successor.img.files`; `kmorph arm` rebuilds it when one of them changes,
+and `kmorph status` says which.
 
 ## Network identity
 
