@@ -18,7 +18,7 @@ LDFLAGS += -static
 endif
 
 WARN     = -Wall -Wextra -Werror -Wshadow -Wmissing-prototypes
-CPPFLAGS = -D_GNU_SOURCE -Iinclude -Ilib/fdt -DKMORPHD_PATH='"$(PREFIX)/bin/kmorphd"'
+CPPFLAGS = -D_GNU_SOURCE -Iinclude -Ilib/fdt
 ALL_CFLAGS = -std=gnu11 $(CFLAGS) $(CPPFLAGS)
 
 BUILD = build

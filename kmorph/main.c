@@ -4,7 +4,6 @@
  */
 #include <errno.h>
 #include <getopt.h>
-#include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -17,7 +16,6 @@
 #include "kmorph/request.h"
 #include "arm.h"
 #include "client.h"
-#include "image.h"
 #include "upgrade.h"
 #include "watch.h"
 
@@ -58,49 +56,9 @@ static int status_run(const char *name, const struct mkfs *fs)
 	return 0;
 }
 
-/* kmorphd is installed beside this binary, wherever that is. */
-static const char *kmorphd_path(char *buf, size_t len)
-{
-	char exe[PATH_MAX];
-	ssize_t n = readlink("/proc/self/exe", exe, sizeof(exe) - 1);
-	char *slash;
-
-	if (n <= 0)
-		return KMORPHD_PATH;
-	exe[n] = '\0';
-	slash = strrchr(exe, '/');
-	if (!slash)
-		return KMORPHD_PATH;
-	*slash = '\0';
-	if (strlen(exe) + sizeof("/kmorphd") > len)
-		return KMORPHD_PATH;
-	strcpy(buf, exe);
-	strcat(buf, "/kmorphd");
-	return buf;
-}
-
-static int init_run(const struct kmorph_config *cfg)
-{
-	struct cpio image = CPIO_INIT;
-	char buf[PATH_MAX];
-	int ret;
-
-	ret = image_build(cfg, kmorphd_path(buf, sizeof(buf)), &image);
-	if (!ret) {
-		ret = image_write(&image, KMORPH_INITRD_PATH);
-		if (ret)
-			log_err("cannot write %s: %s", KMORPH_INITRD_PATH, strerror(-ret));
-		else
-			log_info("successor image written to %s (%zu bytes)", KMORPH_INITRD_PATH,
-				 image.len);
-	}
-	cpio_free(&image);
-	return ret;
-}
-
 static void usage(void)
 {
-	fprintf(stderr, "usage: kmorph <init|arm|disarm|status|upgrade|watch> [--config PATH]\n");
+	fprintf(stderr, "usage: kmorph <arm|disarm|status|upgrade|watch> [--config PATH]\n");
 	exit(2);
 }
 
@@ -139,9 +97,7 @@ int main(int argc, char **argv)
 	}
 	devtree_successor_name(DEVTREE_ROOT, name, sizeof(name));
 
-	if (!strcmp(verb, "init"))
-		ret = init_run(&cfg);
-	else if (!strcmp(verb, "arm"))
+	if (!strcmp(verb, "arm"))
 		ret = arm_run(&cfg, name, &fs, &arm_default_hooks);
 	else if (!strcmp(verb, "disarm"))
 		ret = disarm_run(name, &fs, &arm_default_hooks);
