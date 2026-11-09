@@ -734,7 +734,8 @@ static void a_successor_without_the_tty_hands_on_its_own_earlycon(void)
 	CHECK_STREQ(calls.seq, "");
 	CHECK_EQ(file_write(own_cmdline, own, sizeof(own) - 1), 0);
 	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &hooks), 0);
-	CHECK_STREQ(calls.cmdline, "earlycon=pl011,mmio32,0x9000000,115200 keep_bootcon");
+	CHECK_STREQ(calls.cmdline, "root=/dev/vda rd.retry=2147483647 rd.timeout=0 "
+		    "rootdelay=2147483647 earlycon=pl011,mmio32,0x9000000,115200 keep_bootcon");
 	unlink(own_cmdline);
 	config_free(&cfg);
 }
@@ -817,6 +818,28 @@ static void console_config_refuses_a_pool_without_the_serial_device(void)
 	parse_console_config();
 	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &hooks), -ENOENT);
 	CHECK_STREQ(calls.seq, "");
+	config_free(&cfg);
+}
+
+static void arm_copies_its_own_cmdline_under_the_configured_one(void)
+{
+	static const char own[] = "BOOT_IMAGE=/vmlinuz root=UUID=1234 ro quiet splash "
+				  "crashkernel=512M console=tty0 isolcpus=2-3 net.ifnames=0 loglevel=0\n";
+	struct mkfs fs = { sysfs };
+
+	setup();
+	parse_config("cpus = 12\nmemory = 1GB\nkernel = /boot/vmlinuz\n"
+		     "cmdline = loglevel=7 rd.timeout=30\ncmdline_drop = splash\n");
+	CHECK_EQ(file_write(own_cmdline, own, sizeof(own) - 1), 0);
+	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &hooks), 0);
+	CHECK_STREQ(calls.cmdline, "root=UUID=1234 ro quiet net.ifnames=0 loglevel=7 rd.timeout=30 "
+		    "rd.retry=2147483647 rootdelay=2147483647");
+
+	parse_config("cpus = 12\nmemory = 1GB\nkernel = /boot/vmlinuz\n"
+		     "cmdline = quiet\ncmdline_drop = *\n");
+	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &hooks), 0);
+	CHECK_STREQ(calls.cmdline, "quiet");
+	unlink(own_cmdline);
 	config_free(&cfg);
 }
 
@@ -1224,6 +1247,7 @@ TEST_MAIN({
 	RUN(console_refuses_a_placeholder_port);
 	RUN(a_login_needs_an_8250_uart);
 	RUN(a_successor_without_the_tty_hands_on_its_own_earlycon);
+	RUN(arm_copies_its_own_cmdline_under_the_configured_one);
 	RUN(arm_refuses_cpus_outside_the_pool);
 	RUN(arm_refuses_more_memory_than_free);
 	RUN(arm_initialises_the_pool_when_there_is_none);

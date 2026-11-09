@@ -154,10 +154,9 @@ installs, from `dist/`:
   current while armed, and disarms on stop;
 - a kernel hook, for kernel-install and for Debian's `postinst.d`, that
   rebuilds the image for the kernel just installed and points the `kernel`
-  and `cmdline` keys at it.
+  key at it.
 
-The hook writes `kernel` and `cmdline`; the operator writes the remaining
-keys once:
+The hook writes `kernel`; the operator writes the remaining keys once:
 
 ```ini
 cpus    = 47
@@ -226,7 +225,8 @@ else has a default. `kmorph.conf.example` lists every key.
 | `memory` | | Memory for the successor, e.g. `128MB`, `4GB`. |
 | `kernel` | | Kernel image: an ELF vmlinux, or a bzImage from which the vmlinux is extracted; an Image on arm64. |
 | `initrd` | `/var/lib/kmorph/successor.img` | Initramfs for the successor; the default is where `kmorph init` and `kmorph-mkimage` write. kmorph appends the config to whichever image is used. |
-| `cmdline` | | Kernel command line for the successor. With `console` set, kmorph adds an earlycon for it; see [Successor console](#successor-console). With `dump` set, kmorph adds `iomem=relaxed`. |
+| `cmdline` | | Parameters for the successor on top of this kernel's own command line, which kmorph copies less the parameters about this kernel's own resources and boot: `BOOT_IMAGE`, `initrd`, `crashkernel`, `mem`, `memmap`, `cma`, `kernelcore`, `movablecore`, the hugepage sizes and counts, the CPU lists such as `isolcpus` and `nohz_full`, `maxcpus`, `nr_cpus`, `possible_cpus`, the consoles and `resume`. A parameter here replaces the copied ones of the same name. With `root` in the result, kmorph adds `rd.retry`, `rd.timeout` and `rootdelay` values that keep the initramfs waiting for the root disk until the takeover; with `console` set, an earlycon for it, see [Successor console](#successor-console); with `dump` set, `iomem=relaxed`. `kmorph arm` prints the result. |
+| `cmdline_drop` | | Further parameter names left out of the copy, comma separated. `*` copies nothing, so that `cmdline` is the whole command line. |
 | `devices` | | Devices handed to the successor, comma separated, as PCI addresses (`0000:09:00.0`) or as the names sysfs knows them by: a network interface (`enp61s0f1`), a block device (`nvme0n1`), a framebuffer (`fb0`), a USB bus (`usb1`). A name resolves to the PCI function behind it. The successor owns these from boot, a NIC to be reachable while armed for instance; it adopts every other device at the takeover. |
 | `machine_cpus` | from the firmware | Every CPU on the machine. Set only on a machine with neither ACPI nor a firmware device tree. |
 | `modules` | | Kernel modules the distro image builders add to the successor image, comma separated: the vsock transport when it is a module, drivers for devices in `devices`. Ignored by the `kmorph init` image, which has no module loader. |

@@ -20,9 +20,17 @@ cpus    = 1
 # Memory for the successor, e.g. 128MB or 4GB.
 memory  = 128MB
 
-# Kernel command line for the successor. With console set, kmorph adds
-# an earlycon for that line unless this already has an early console.
-#cmdline = quiet
+# Parameters for the successor on top of this kernel's own command line,
+# which kmorph copies less what describes this kernel's own resources and
+# boot (BOOT_IMAGE, initrd, crashkernel, mem, hugepages, isolcpus, the
+# consoles and the like). A parameter here replaces the copied ones of the
+# same name. With console set, kmorph adds an earlycon for that line
+# unless this already has an early console.
+#cmdline = loglevel=7 printk.devkmsg=on
+
+# Further parameter names left out of the copy. * copies nothing, so that
+# cmdline is the whole command line.
+#cmdline_drop = splash
 
 # Devices the successor owns from boot, comma separated: PCI addresses
 # or the names sysfs knows them by (a network interface, a block device,

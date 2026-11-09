@@ -8,6 +8,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+#include "kmorph/cmdline.h"
 #include "kmorph/cpio.h"
 #include "kmorph/crashinfo.h"
 #include "kmorph/devname.h"
@@ -407,22 +408,6 @@ static int create_instance(const struct kmorph_config *cfg, const char *name,
  */
 #define DUMP_CMDLINE_PARAM "iomem=relaxed"
 
-static bool cmdline_has_word(const char *cmdline, const char *word)
-{
-	size_t n = strlen(word);
-	const char *p = cmdline;
-
-	while ((p = strstr(p, word))) {
-		bool starts = p == cmdline || p[-1] == ' ';
-		bool ends = p[n] == '\0' || p[n] == ' ';
-
-		if (starts && ends)
-			return true;
-		p += n;
-	}
-	return false;
-}
-
 /* earlyprintk is x86's own early console, earlycon any architecture's */
 static bool has_early_console(const char *cmdline)
 {
@@ -485,40 +470,86 @@ static int console_earlycon(const struct kmorph_config *cfg, const struct arm_ho
 	return -ENOENT;
 }
 
-static int append_word(char **s, const char *word)
-{
-	char *n;
+/*
+ * Parameters describing this kernel's own resources and boot, which would
+ * be wrong in the successor or eat its memory; the console ones are the
+ * host's, and the successor gets its own earlycon.
+ */
+static const char *const host_only_params[] = {
+	"BOOT_IMAGE", "initrd", "crashkernel", "mem", "memmap", "cma", "kernelcore",
+	"movablecore", "hugepages", "hugepagesz", "default_hugepagesz", "isolcpus",
+	"nohz_full", "rcu_nocbs", "irqaffinity", "maxcpus", "nr_cpus", "possible_cpus",
+	"console", "earlycon", "earlyprintk", "keep_bootcon", "resume", "resume_offset",
+};
 
-	if (*s && cmdline_has_word(*s, word))
+/* The root disk is the predecessor's until the takeover; the initramfs waits for it. */
+static const char *const root_wait_params[] = {
+	"rd.retry=2147483647", "rd.timeout=0", "rootdelay=2147483647",
+};
+
+static int copy_own_cmdline(const struct kmorph_config *cfg, const struct arm_hooks *h,
+			    struct cmdline *line)
+{
+	char *own;
+	size_t i;
+	int ret;
+
+	line->words = NULL;
+	line->count = 0;
+	if (!h->cmdline_path || strlist_has(&cfg->cmdline_drop, "*"))
 		return 0;
-	if (asprintf(&n, "%s%s%s", *s ? *s : "", *s && **s ? " " : "", word) < 0)
-		return -ENOMEM;
-	free(*s);
-	*s = n;
+	ret = file_read_string(h->cmdline_path, &own);
+	if (ret) {
+		log_warn("cannot read %s (%s); the successor gets only the configured command line",
+			 h->cmdline_path, strerror(-ret));
+		return 0;
+	}
+	ret = cmdline_split(own, line);
+	free(own);
+	if (ret)
+		return ret;
+	for (i = 0; i < sizeof(host_only_params) / sizeof(host_only_params[0]); i++)
+		cmdline_remove(line, host_only_params[i]);
+	for (i = 0; i < cfg->cmdline_drop.count; i++)
+		cmdline_remove(line, cfg->cmdline_drop.items[i]);
 	return 0;
 }
 
-/* The configured command line, plus what the console and the dump need. */
-static int successor_cmdline(const struct kmorph_config *cfg, const char *earlycon, char **out)
+/*
+ * This kernel's command line less what is host-only, the configured one on
+ * top, replacing words of the same name, and what the root wait, the
+ * console and the dump need. NULL in out: an empty command line.
+ */
+static int successor_cmdline(const struct kmorph_config *cfg, const struct arm_hooks *h,
+			     const char *earlycon, char **out)
 {
-	char *s = NULL;
-	int ret = 0;
+	struct cmdline line, mine = { 0 };
+	size_t i;
+	int ret;
 
-	if (cfg->cmdline && !(s = strdup(cfg->cmdline)))
-		return -ENOMEM;
-	if (*earlycon) {
-		ret = append_word(&s, earlycon);
+	ret = copy_own_cmdline(cfg, h, &line);
+	if (!ret && cfg->cmdline)
+		ret = cmdline_split(cfg->cmdline, &mine);
+	for (i = 0; !ret && i < mine.count; i++)
+		cmdline_remove(&line, strndupa(mine.words[i], strcspn(mine.words[i], "=")));
+	for (i = 0; !ret && i < mine.count; i++)
+		ret = cmdline_append(&line, mine.words[i]);
+	if (!ret && cmdline_has(&line, "root"))
+		for (i = 0; !ret && i < sizeof(root_wait_params) / sizeof(root_wait_params[0]); i++)
+			ret = cmdline_add(&line, root_wait_params[i]);
+	if (!ret && *earlycon) {
+		ret = cmdline_add(&line, earlycon);
 		if (!ret)
-			ret = append_word(&s, "keep_bootcon");
+			ret = cmdline_add(&line, "keep_bootcon");
 	}
 	if (!ret && cfg->dump)
-		ret = append_word(&s, DUMP_CMDLINE_PARAM);
-	if (ret) {
-		free(s);
-		return ret;
-	}
-	*out = s;
-	return 0;
+		ret = cmdline_add(&line, DUMP_CMDLINE_PARAM);
+	*out = NULL;
+	if (!ret && line.count && !(*out = cmdline_join(&line)))
+		ret = -ENOMEM;
+	cmdline_free(&line);
+	cmdline_free(&mine);
+	return ret;
 }
 
 static int write_all(int fd, const void *buf, size_t len)
@@ -658,12 +689,13 @@ static int load_and_exec(const struct kmorph_config *cfg, const struct arm_hooks
 		return kernel_fd;
 	}
 
-	ret = successor_cmdline(cfg, earlycon, &cmdline);
+	ret = successor_cmdline(cfg, h, earlycon, &cmdline);
 	if (ret) {
 		close(kernel_fd);
 		log_err("cannot build the successor's command line: %s", strerror(-ret));
 		return ret;
 	}
+	log_info("successor command line: %s", cmdline ? cmdline : "(empty)");
 
 	ret = h->kexec_load(kernel_fd, initrd_fd, cmdline, id);
 	close(kernel_fd);

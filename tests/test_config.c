@@ -143,6 +143,17 @@ static void parsed_text_is_kept_verbatim(void)
 	CHECK(c.text == NULL);
 }
 
+static void cmdline_drop_is_a_list_of_names(void)
+{
+	struct kmorph_config c;
+	char err[128];
+
+	CHECK_EQ(config_parse("cmdline_drop = splash, quiet\n", &c, err, sizeof(err)), 0);
+	CHECK_EQ(c.cmdline_drop.count, 2);
+	CHECK_STREQ(c.cmdline_drop.items[1], "quiet");
+	config_free(&c);
+}
+
 static void console_login_needs_a_console(void)
 {
 	struct kmorph_config c;
@@ -210,6 +221,7 @@ TEST_MAIN({
 	RUN(load_reads_a_file);
 	RUN(parsed_text_is_kept_verbatim);
 	RUN(console_login_needs_a_console);
+	RUN(cmdline_drop_is_a_list_of_names);
 	RUN(modules_is_a_list_for_the_image_builders);
 	RUN(standby_lists_units_and_files);
 	RUN(reset_devices_defaults_to_yes);
