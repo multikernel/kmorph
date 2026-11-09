@@ -143,13 +143,15 @@ static void parsed_text_is_kept_verbatim(void)
 	CHECK(c.text == NULL);
 }
 
-static void console_needs_a_login_program(void)
+static void console_login_needs_a_console(void)
 {
 	struct kmorph_config c;
 	char err[128];
 
-	CHECK_EQ(config_parse("console = ttyS0\n", &c, err, sizeof(err)), -EINVAL);
-	CHECK_STREQ(err, "console needs console_login");
+	CHECK_EQ(config_parse("console = ttyS0\n", &c, err, sizeof(err)), 0);
+	config_free(&c);
+	CHECK_EQ(config_parse("console_login = /bin/sh\n", &c, err, sizeof(err)), -EINVAL);
+	CHECK_STREQ(err, "console_login needs console");
 	CHECK_EQ(config_parse("console = ttyS0\nconsole_login = /bin/sh\n", &c, err, sizeof(err)), 0);
 	config_free(&c);
 }
@@ -207,7 +209,7 @@ TEST_MAIN({
 	RUN(probe_timeouts_must_be_positive);
 	RUN(load_reads_a_file);
 	RUN(parsed_text_is_kept_verbatim);
-	RUN(console_needs_a_login_program);
+	RUN(console_login_needs_a_console);
 	RUN(modules_is_a_list_for_the_image_builders);
 	RUN(standby_lists_units_and_files);
 	RUN(reset_devices_defaults_to_yes);

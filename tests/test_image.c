@@ -73,6 +73,23 @@ static void console_adds_the_login_program_at_its_own_path(void)
 	config_free(&cfg);
 }
 
+static void console_without_a_login_adds_only_kmorphd(void)
+{
+	struct kmorph_config cfg;
+	struct cpio c = CPIO_INIT;
+	struct cpio_entry e;
+	char err[64];
+
+	put_binaries(0, 0);
+	CHECK_EQ(config_parse("cpus = 1\nmemory = 128MB\nkernel = /boot/vmlinuz\nconsole = ttyAMA0\n",
+			      &cfg, err, sizeof(err)), 0);
+	CHECK_EQ(image_build(&cfg, kmorphd_path, &c), 0);
+	CHECK_EQ(find(&c, "init", &e), 1);
+	CHECK_EQ(find(&c, login_path + 1, &e), 0);
+	cpio_free(&c);
+	config_free(&cfg);
+}
+
 static void dynamic_binaries_are_refused(void)
 {
 	struct kmorph_config cfg;
@@ -133,6 +150,7 @@ TEST_MAIN({
 	snprintf(login_path, sizeof(login_path), "%s/sh", dir);
 	RUN(image_holds_kmorphd_as_init);
 	RUN(console_adds_the_login_program_at_its_own_path);
+	RUN(console_without_a_login_adds_only_kmorphd);
 	RUN(dynamic_binaries_are_refused);
 	RUN(a_missing_binary_is_reported);
 	RUN(write_creates_the_directory_and_the_file);

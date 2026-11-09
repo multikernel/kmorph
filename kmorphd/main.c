@@ -133,7 +133,7 @@ static void on_state(struct takeover *t, enum takeover_state state)
 	if (state != TK_TAKEN_OVER)
 		return;
 	report_taken_over();
-	if (d->cfg.console)
+	if (d->cfg.console_login)
 		console_start(d->cfg.console, d->cfg.console_baud, d->cfg.console_login);
 	mark_taken_over();
 }

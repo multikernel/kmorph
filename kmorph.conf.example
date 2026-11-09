@@ -65,13 +65,13 @@ memory  = 128MB
 # mastering if it cannot be reset. no: leave it as the crash left it.
 #reset_devices = yes
 
-# Serial line that shows the successor's kernel messages and, after the
-# takeover, its login, e.g. ttyS0 or ttyAMA0.
+# Serial line that shows the successor's kernel messages, from its boot
+# through the takeover, e.g. ttyS0 or ttyAMA0.
 #console = ttyS0
 
 # Speed of that line.
 #console_baud = 115200
 
-# Program the getty runs instead of login, e.g. /bin/sh for an image
-# without accounts.
+# Program run on that line after the takeover, e.g. /bin/sh for an image
+# without accounts. Needs an 8250 UART. Unset: no login.
 #console_login = /bin/sh

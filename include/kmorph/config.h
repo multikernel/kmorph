@@ -35,7 +35,7 @@ struct kmorph_config {
 	/* Console the successor takes over: a serial line it is armed with */
 	char *console;			/* e.g. ttyS0 */
 	unsigned int console_baud;
-	char *console_login;		/* program run on the line; required with console */
+	char *console_login;		/* program run on the line after the takeover; optional */
 	char *text;			/* the parsed text, as arm forwards it to the successor */
 };
 

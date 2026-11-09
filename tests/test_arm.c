@@ -656,6 +656,89 @@ static void parse_console_config(void)
 	put_tty("ttyS0", "4\n", "0\n", "0x3F8\n");
 }
 
+static void parse_config(const char *text)
+{
+	char err[64];
+
+	config_free(&cfg);
+	CHECK_EQ(config_parse(text, &cfg, err, sizeof(err)), 0);
+}
+
+static void console_puts_kernel_messages_on_the_line_through_earlycon(void)
+{
+	struct mkfs fs = { sysfs };
+	void *dtbo;
+	size_t len;
+
+	setup();
+	parse_config("cpus = 12\nmemory = 1GB\nkernel = /boot/vmlinuz\ncmdline = quiet\n"
+		     "console = ttyAMA0\n");
+	put_tty("ttyAMA0", "32\n", "3\n", "0x9000000\n");
+	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &hooks), 0);
+	CHECK_STREQ(calls.cmdline, "quiet earlycon=pl011,mmio32,0x9000000,115200 keep_bootcon");
+	dtbo = read_blob("overlays/new", &len);
+	CHECK(!memmem(dtbo, len, "serial8250", 10));
+	free(dtbo);
+	config_free(&cfg);
+}
+
+static void an_early_console_in_cmdline_wins(void)
+{
+	struct mkfs fs = { sysfs };
+
+	setup();
+	parse_config("cpus = 12\nmemory = 1GB\nkernel = /boot/vmlinuz\n"
+		     "cmdline = earlyprintk=serial,ttyS0,115200 keep_bootcon\nconsole = ttyAMA0\n");
+	put_tty("ttyAMA0", "32\n", "3\n", "0x9000000\n");
+	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &hooks), 0);
+	CHECK_STREQ(calls.cmdline, "earlyprintk=serial,ttyS0,115200 keep_bootcon");
+	config_free(&cfg);
+}
+
+static void console_refuses_a_placeholder_port(void)
+{
+	struct mkfs fs = { sysfs };
+
+	setup();
+	parse_config("cpus = 12\nmemory = 1GB\nkernel = /boot/vmlinuz\nconsole = ttyS1\n");
+	put_tty("ttyS1", "0\n", "0\n", "0x0\n");
+	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &hooks), -ENODEV);
+	CHECK_STREQ(calls.seq, "");
+	config_free(&cfg);
+}
+
+static void a_login_needs_an_8250_uart(void)
+{
+	struct mkfs fs = { sysfs };
+	char text[1024];
+
+	setup();
+	snprintf(text, sizeof(text), "cpus = 12\nmemory = 1GB\nkernel = /boot/vmlinuz\n"
+		 "console = ttyAMA0\nconsole_login = %s\n", login_path);
+	parse_config(text);
+	put_tty("ttyAMA0", "32\n", "3\n", "0x9000000\n");
+	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &hooks), -EOPNOTSUPP);
+	CHECK_STREQ(calls.seq, "");
+	config_free(&cfg);
+}
+
+static void a_successor_without_the_tty_hands_on_its_own_earlycon(void)
+{
+	static const char own[] = "root=/dev/vda earlycon=pl011,mmio32,0x9000000,115200 keep_bootcon\n";
+	struct mkfs fs = { sysfs };
+
+	setup();
+	parse_config("cpus = 12\nmemory = 1GB\nkernel = /boot/vmlinuz\nconsole = ttyAMA7\n");
+	unlink(own_cmdline);
+	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &hooks), -ENOENT);
+	CHECK_STREQ(calls.seq, "");
+	CHECK_EQ(file_write(own_cmdline, own, sizeof(own) - 1), 0);
+	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &hooks), 0);
+	CHECK_STREQ(calls.cmdline, "earlycon=pl011,mmio32,0x9000000,115200 keep_bootcon");
+	unlink(own_cmdline);
+	config_free(&cfg);
+}
+
 static void put_root_tree_with_serial(void)
 {
 	void *fdt = fdt_test_begin(2048);
@@ -734,73 +817,6 @@ static void console_config_refuses_a_pool_without_the_serial_device(void)
 	parse_console_config();
 	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &hooks), -ENOENT);
 	CHECK_STREQ(calls.seq, "");
-	config_free(&cfg);
-}
-
-static void parse_console_line(const char *tty, const char *cmdline)
-{
-	char text[1024], err[64];
-
-	config_free(&cfg);
-	snprintf(text, sizeof(text),
-		 "cpus = 12\nmemory = 1GB\nkernel = /boot/vmlinuz\n%s%s%sconsole = %s\nconsole_login = %s\n",
-		 cmdline ? "cmdline = " : "", cmdline ? cmdline : "", cmdline ? "\n" : "", tty, login_path);
-	CHECK_EQ(config_parse(text, &cfg, err, sizeof(err)), 0);
-}
-
-static void console_puts_kernel_messages_on_the_line_through_earlycon(void)
-{
-	struct mkfs fs = { sysfs };
-
-	setup();
-	put_root_tree_with_serial();
-	parse_console_line("ttyAMA0", "quiet");
-	put_tty("ttyAMA0", "32\n", "3\n", "0x9000000\n");
-	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &hooks), 0);
-	CHECK_STREQ(calls.cmdline, "quiet earlycon=pl011,mmio32,0x9000000,115200 keep_bootcon");
-	config_free(&cfg);
-}
-
-static void an_early_console_in_cmdline_wins(void)
-{
-	struct mkfs fs = { sysfs };
-
-	setup();
-	put_root_tree_with_serial();
-	parse_console_line("ttyAMA0", "earlyprintk=serial,ttyS0,115200 keep_bootcon");
-	put_tty("ttyAMA0", "32\n", "3\n", "0x9000000\n");
-	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &hooks), 0);
-	CHECK_STREQ(calls.cmdline, "earlyprintk=serial,ttyS0,115200 keep_bootcon");
-	config_free(&cfg);
-}
-
-static void console_refuses_a_placeholder_port(void)
-{
-	struct mkfs fs = { sysfs };
-
-	setup();
-	parse_console_line("ttyS1", NULL);
-	put_tty("ttyS1", "0\n", "0\n", "0x0\n");
-	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &hooks), -ENODEV);
-	CHECK_STREQ(calls.seq, "");
-	config_free(&cfg);
-}
-
-static void a_successor_without_the_tty_hands_on_its_own_earlycon(void)
-{
-	static const char own[] = "root=/dev/vda earlycon=pl011,mmio32,0x9000000,115200 keep_bootcon\n";
-	struct mkfs fs = { sysfs };
-
-	setup();
-	put_root_tree_with_serial();
-	parse_console_line("ttyAMA7", NULL);
-	unlink(own_cmdline);
-	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &hooks), -ENOENT);
-	CHECK_STREQ(calls.seq, "");
-	CHECK_EQ(file_write(own_cmdline, own, sizeof(own) - 1), 0);
-	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &hooks), 0);
-	CHECK_STREQ(calls.cmdline, "earlycon=pl011,mmio32,0x9000000,115200 keep_bootcon");
-	unlink(own_cmdline);
 	config_free(&cfg);
 }
 
@@ -1206,6 +1222,7 @@ TEST_MAIN({
 	RUN(console_puts_kernel_messages_on_the_line_through_earlycon);
 	RUN(an_early_console_in_cmdline_wins);
 	RUN(console_refuses_a_placeholder_port);
+	RUN(a_login_needs_an_8250_uart);
 	RUN(a_successor_without_the_tty_hands_on_its_own_earlycon);
 	RUN(arm_refuses_cpus_outside_the_pool);
 	RUN(arm_refuses_more_memory_than_free);

@@ -166,8 +166,8 @@ int config_parse(const char *text, struct kmorph_config *c, char *err, size_t er
 	}
 
 	free(copy);
-	if (!ret && c->console && !c->console_login) {
-		snprintf(err, errlen, "console needs console_login");
+	if (!ret && c->console_login && !c->console) {
+		snprintf(err, errlen, "console_login needs console");
 		ret = -EINVAL;
 	}
 	if (!ret) {

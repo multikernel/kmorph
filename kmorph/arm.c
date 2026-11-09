@@ -70,14 +70,18 @@ static bool strlist_has(const struct strlist *l, const char *s)
 	return false;
 }
 
-/* A serial console means the legacy 8250 device; the kernel allows a spawn only listed platform devices. */
+/*
+ * A login on the console needs the successor to drive the line, through
+ * the legacy 8250 device; the kernel allows a spawn only listed platform
+ * devices. Kernel messages alone go through earlycon and need none.
+ */
 static void console_platform_devices(const struct kmorph_config *cfg, struct strlist *out)
 {
 	static char serial8250[] = "serial8250";
 	static char *names[] = { serial8250 };
 
 	out->items = names;
-	out->count = cfg->console ? 1 : 0;
+	out->count = cfg->console_login ? 1 : 0;
 }
 
 static bool strlist_has(const struct strlist *l, const char *s);
@@ -458,6 +462,14 @@ static int console_earlycon(const struct kmorph_config *cfg, const struct arm_ho
 	if (ret == -ENODEV) {
 		log_err("%s is a placeholder with no UART behind it", cfg->console);
 		return ret;
+	}
+	if (cfg->console_login && (ret || u.family != UART_8250)) {
+		if (ret)
+			log_err("cannot read the UART behind %s: %s", cfg->console, strerror(-ret));
+		else
+			log_err("a login on %s needs an 8250 UART; without console_login "
+				"the line still shows the successor's kernel messages", cfg->console);
+		return ret ? ret : -EOPNOTSUPP;
 	}
 	if (has_early_console(cfg->cmdline))
 		return 0;

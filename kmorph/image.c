@@ -38,7 +38,7 @@ int image_build(const struct kmorph_config *cfg, const char *kmorphd_path, struc
 	int ret;
 
 	ret = add_static(out, "kmorphd", kmorphd_path, "init");
-	if (!ret && cfg->console)
+	if (!ret && cfg->console_login)
 		ret = add_static(out, "console_login", cfg->console_login, cfg->console_login);
 	if (!ret)
 		ret = cpio_finish(out);

@@ -107,7 +107,8 @@ production.
    ```
 
    The login program here is a static busybox copied under the name `sh`,
-   so that it runs as a shell.
+   so that it runs as a shell. Without `console_login` the line still
+   shows the successor's kernel messages.
 
 2. Build the successor image, once per kmorph install:
 
@@ -231,9 +232,9 @@ else has a default. `kmorph.conf.example` lists every key.
 | `modules` | | Kernel modules the distro image builders add to the successor image, comma separated: the vsock transport when it is a module, drivers for devices in `devices`. Ignored by the `kmorph init` image, which has no module loader. |
 | `standby` | | systemd units the successor runs before the takeover, comma separated. See [Standby services](#standby-services). |
 | `standby_files` | | Further files or directories the standby image carries, such as plugins from a package other than the unit's. |
-| `console` | | Serial line that shows the successor's kernel messages and, after the takeover, its login, e.g. `ttyS0` or `ttyAMA0`. |
+| `console` | | Serial line that shows the successor's kernel messages, e.g. `ttyS0` or `ttyAMA0`. |
 | `console_baud` | `115200` | Speed of that line. |
-| `console_login` | | Program run on the serial line after the takeover, required with `console`. With the `kmorph init` image it must be a static executable, which `kmorph init` copies in; any other image carries its own. |
+| `console_login` | | Program run on that line after the takeover; needs an 8250 UART. Unset: no login. With the `kmorph init` image it must be a static executable, which `kmorph init` copies in; any other image carries its own. |
 
 ### Detection and takeover (used by kmorphd)
 
@@ -260,7 +261,7 @@ kmorph upgrade [--config PATH]
 
 **init** writes the minimal successor image, `/var/lib/kmorph/successor.img`:
 an initramfs holding the kmorphd installed beside kmorph as its init and,
-when `console` is set, the `console_login` program at its own path. Both
+when `console_login` is set, that program at its own path. Both
 must be static executables, since the image has no libc; init refuses a
 dynamic one. Run it once after installing kmorph and again after upgrading
 it or changing `console_login`. The config is not in the image.
@@ -269,7 +270,7 @@ it or changing `console_login`. The config is not in the image.
 multikernel pool yet, kmorph mounts `/sys/fs/multikernel` and creates a
 pool holding the successor's CPUs, its memory plus one memory granule of
 headroom for the kernel's own use, its devices, and the serial device when
-`console` is set. If a pool exists, kmorph uses it and adds any configured
+`console_login` is set. If a pool exists, kmorph uses it and adds any configured
 PCI device the pool lacks. It then creates the instance, loads the kernel
 and the image with the config appended to it, and boots the successor. The
 instance is named after the generation it starts: a host's successor is
@@ -422,11 +423,13 @@ UART has no driver, and so no tty, hands on the earlycon it booted with
 when it arms the next one. `kmorph arm` refuses a line with no UART
 behind it, such as an unused `ttyS` placeholder.
 
-`kmorph arm` also places the legacy serial device in the pool and hands it
-to the successor, whose kernel registers it at boot. After the takeover
-kmorphd switches the line to polling, since the successor has no interrupt
-routing for it, and keeps the login program on it, so the serial console
-that showed the predecessor now shows the successor's shell.
+With `console_login` set as well, `kmorph arm` places the legacy serial
+device in the pool and hands it to the successor, whose kernel registers
+it at boot. After the takeover kmorphd switches the line to polling,
+since the successor has no interrupt routing for it, and keeps the login
+program on it, so the serial console that showed the predecessor now
+shows the successor's shell. Polling needs the 8250 driver, so a login
+needs an 8250 UART.
 
 Do not use `console=mktty0` in `cmdline`: that console forwards messages
 to the predecessor and, once the predecessor is dead, floods the successor
@@ -514,8 +517,8 @@ upgrade writes no dump.
    whole memory blocks, 128 MB on x86, from a kernel that does not.
 7. **Dump and reclaim.** With `dump` set, memory is held back until it has
    been written to the dump file, then reclaimed.
-8. **Console.** With `console` set, the login program is started on the
-   serial line.
+8. **Console.** With `console_login` set, the login program is started on
+   the serial line.
 
 ### What the successor ends up with
 
