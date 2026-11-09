@@ -40,10 +40,6 @@ memory  = 512MB
 # a framebuffer, a USB bus). It adopts every other device at the takeover.
 #devices = enp9s0
 
-# Every CPU on the machine. Set only on a machine with neither ACPI nor
-# a firmware device tree.
-#machine_cpus = 0-3
-
 # Kernel modules the distro image builders add to the successor image,
 # comma separated: the vsock transport when it is a module, drivers for
 # devices handed to the successor. Ignored with initrd.

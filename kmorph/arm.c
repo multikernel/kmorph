@@ -319,38 +319,30 @@ static void cpus_from_firmware_tree(const struct arm_hooks *h, struct host_tree 
 
 /*
  * The host tree the successor boots with: every CPU on the machine (from
- * the config, else the firmware's MADT or device tree), the machine's RAM,
- * and its PCI devices. The successor can only fence and adopt what is
- * named here.
+ * the firmware's MADT or device tree), the machine's RAM, and its PCI
+ * devices. The successor can only fence and adopt what is named here.
  */
 static int build_host_tree(const struct kmorph_config *cfg, const struct arm_hooks *h,
 			   struct host_tree *ht)
 {
-	bool no_madt = false;
-	int ret = 0;
+	int ret;
 
 	memset(ht, 0, sizeof(*ht));
-	if (cfg->machine_cpus.count) {
-		ht->cpus = cfg->machine_cpus;
-	} else {
-		ret = madt_read_cpus(h->madt_path, &ht->cpus);
-		no_madt = ret == -ENOENT;
-	}
-	if (no_madt)
+	ret = madt_read_cpus(h->madt_path, &ht->cpus);
+	if (ret == -ENOENT)
 		inherit_cpus_from_own_host_tree(h, ht);
-	if (no_madt && !ht->cpus.count)
+	if (ret == -ENOENT && !ht->cpus.count)
 		cpus_from_firmware_tree(h, ht);
 	if (!ht->cpus.count) {
-		log_err("no machine CPU list: %s unreadable (%s) and machine_cpus unset",
-			h->madt_path, strerror(-ret));
+		log_err("no machine CPU list: %s unreadable (%s)", h->madt_path, strerror(-ret));
 		return -ENOENT;
 	}
 
 	ret = iomem_system_ram(h->iomem_path, &ht->ram);
 	if (ret || !ht->ram.count) {
 		log_err("no machine RAM map in %s", h->iomem_path);
-		ret = ret ? ret : -ENOENT;
-		goto fail;
+		host_tree_free(ht);
+		return ret ? ret : -ENOENT;
 	}
 	if (pci_list_all(h->pci_root, &ht->devices))
 		log_warn("no PCI inventory under %s; host tree lists no devices", h->pci_root);
@@ -362,20 +354,6 @@ static int build_host_tree(const struct kmorph_config *cfg, const struct arm_hoo
 		 ht->cpus.count, (unsigned long long)rangeset_total(&ht->ram) >> 20,
 		 ht->ram.count, ht->devices.count, ht->vmcore.cpu_notes.count);
 	return 0;
-fail:
-	if (ht->cpus.ids != cfg->machine_cpus.ids)
-		cpulist_free(&ht->cpus);
-	rangeset_free(&ht->ram);
-	vmcore_info_free(&ht->vmcore);
-	return ret;
-}
-
-/* The CPU list may be the config's own; only free what was read here. */
-static void release_host_tree(const struct kmorph_config *cfg, struct host_tree *ht)
-{
-	if (ht->cpus.ids == cfg->machine_cpus.ids)
-		ht->cpus.ids = NULL;
-	host_tree_free(ht);
 }
 
 static int create_instance(const struct kmorph_config *cfg, const char *name,
@@ -393,7 +371,7 @@ static int create_instance(const struct kmorph_config *cfg, const char *name,
 		return ret;
 	ret = dt_build_instance_create(name, &cfg->cpus, cfg->memory, &cfg->devices,
 				       &platform, &ht, &dtbo, &len);
-	release_host_tree(cfg, &ht);
+	host_tree_free(&ht);
 	if (ret)
 		return ret;
 	ret = mkfs_apply_overlay(fs, dtbo, len, &tx);

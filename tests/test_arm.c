@@ -369,31 +369,6 @@ static void arm_hands_over_a_host_tree_from_firmware_and_sysfs(void)
 	config_free(&cfg);
 }
 
-static void config_machine_cpus_override_the_madt(void)
-{
-	struct mkfs fs = { sysfs };
-	const uint8_t apics[] = { 0, 1 };
-	static const char iomem[] = "00100000-7ffdbfff : System RAM\n";
-	char err[64];
-	void *dtbo;
-	size_t len;
-	int ht;
-
-	setup();
-	config_free(&cfg);
-	config_parse("cpus = 12\nmemory = 1GB\nkernel = /boot/vmlinuz\nmachine_cpus = 0-7\n",
-		     &cfg, err, sizeof(err));
-	put_madt(apics, 2);
-	CHECK_EQ(file_write(iomem_path, iomem, sizeof(iomem) - 1), 0);
-	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &hooks), 0);
-	dtbo = read_blob("overlays/new", &len);
-	ht = chosen_host_tree(dtbo);
-	CHECK(ht >= 0);
-	CHECK_EQ(fdt_test_get_u64(dtbo, ht, "cpus", 7), 7);
-	free(dtbo);
-	config_free(&cfg);
-}
-
 static void put_cpu_note(int n, const char *addr)
 {
 	char rel[64];
@@ -1239,7 +1214,6 @@ TEST_MAIN({
 	RUN(dump_config_relaxes_the_successors_devmem);
 	RUN(arm_passes_devices_to_the_instance);
 	RUN(arm_hands_over_a_host_tree_from_firmware_and_sysfs);
-	RUN(config_machine_cpus_override_the_madt);
 	RUN(arm_records_the_crash_layout_in_the_host_tree);
 	RUN(arm_without_a_dump_omits_the_vmcore_node);
 	RUN(arm_without_crash_support_omits_the_vmcore_node);

@@ -70,10 +70,6 @@ static int config_set(struct kmorph_config *c, const char *key, const char *valu
 		strlist_free(&c->cmdline_drop);
 		return *value ? parse_strlist(value, &c->cmdline_drop) : 0;
 	}
-	if (!strcmp(key, "machine_cpus")) {
-		cpulist_free(&c->machine_cpus);
-		return *value ? parse_cpulist(value, &c->machine_cpus) : 0;
-	}
 	if (!strcmp(key, "devices")) {
 		strlist_free(&c->devices);
 		return *value ? parse_strlist(value, &c->devices) : 0;
@@ -207,7 +203,6 @@ void config_free(struct kmorph_config *c)
 	free(c->cmdline);
 	strlist_free(&c->cmdline_drop);
 	strlist_free(&c->devices);
-	cpulist_free(&c->machine_cpus);
 	strlist_free(&c->modules);
 	strlist_free(&c->standby);
 	strlist_free(&c->standby_files);

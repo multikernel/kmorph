@@ -37,7 +37,6 @@ static void parses_every_key_with_comments_and_spacing(void)
 		"fence_retries = 1\n"
 		"dump = /var/crash/predecessor.raw\n"
 		"devices = 0000:09:00.0, 0000:0a:00.0\n"
-		"machine_cpus = 0-3\n"
 		"console = ttyS0\n"
 		"console_baud = 9600\n"
 		"console_login = /bin/sh\n";
@@ -58,8 +57,6 @@ static void parses_every_key_with_comments_and_spacing(void)
 	CHECK_EQ(c.devices.count, 2);
 	CHECK_STREQ(c.devices.items[0], "0000:09:00.0");
 	CHECK_STREQ(c.devices.items[1], "0000:0a:00.0");
-	CHECK_EQ(c.machine_cpus.count, 4);
-	CHECK_EQ(c.machine_cpus.ids[3], 3);
 	CHECK_STREQ(c.console, "ttyS0");
 	CHECK_EQ(c.console_baud, 9600);
 	CHECK_STREQ(c.console_login, "/bin/sh");
