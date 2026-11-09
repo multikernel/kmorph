@@ -157,10 +157,6 @@ static void deliver_probe(struct daemon *d, int err)
 	else if (r == PROBE_SILENT)
 		takeover_handle(&d->tk, TK_EV_PROBE_SILENT);
 
-	/*
-	 * The kernel drops /dev/kmsg lines past ten in five seconds, which a
-	 * takeover nears, so a result the new state already tells is not logged.
-	 */
 	if (!changed)
 		return;
 	if (r == PROBE_ERROR)
@@ -571,7 +567,7 @@ static void daemonize(bool wait)
 		close(null);
 	}
 	log_init("kmorphd", -1, -1);
-	log_open_kmsg();
+	log_open_kmsg("/dev/kmsg");
 }
 
 static void usage(void)
@@ -609,7 +605,7 @@ int main(int argc, char **argv)
 	d.init = getpid() == 1;
 	ret = d.init ? init_mount_filesystems(&init_default_env) : 0;
 	log_init("kmorphd", STDERR_FILENO, -1);
-	log_open_kmsg();
+	log_open_kmsg("/dev/kmsg");
 	if (ret)
 		log_warn("init: some filesystems did not mount: %s", strerror(-ret));
 	if (d.init && access(STANDBY_IMAGE, F_OK) == 0) {

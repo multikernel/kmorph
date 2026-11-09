@@ -307,8 +307,7 @@ static void claim_iommus(struct ops *o, bool all_quiet)
  * A device that cannot be taken leaves the others and the takeover to go
  * on. The bus probes no driver while the devices join, so each driver
  * meets its device reset or quiesced rather than as the crash left it,
- * and behind IOMMUs the successor drives. Success is one line for them
- * all, as /dev/kmsg drops a burst of more than ten.
+ * and behind IOMMUs the successor drives.
  */
 int ops_adopt_devices(struct ops *o)
 {

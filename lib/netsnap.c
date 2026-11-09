@@ -655,7 +655,6 @@ int netsnap_apply(const struct netsnap_env *env, const struct netsnap *s, bool *
 			restored[i] = true;
 		up++;
 	}
-	/* One line however many NICs: takeover lines share the /dev/kmsg ratelimit */
 	if (up)
 		log_info("network: restored %s", done);
 	return up;

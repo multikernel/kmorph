@@ -7,7 +7,7 @@
  * takeover messages. Either fd may be -1.
  */
 void log_init(const char *ident, int stderr_fd, int kmsg_fd);
-void log_open_kmsg(void);
+void log_open_kmsg(const char *path);
 
 void log_info(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 void log_warn(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
