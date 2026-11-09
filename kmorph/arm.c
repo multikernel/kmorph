@@ -190,7 +190,9 @@ static int init_pool(const struct kmorph_config *cfg, const struct mkfs *fs,
 				 (unsigned long long)claim.size >> 20,
 				 (unsigned long long)claim.base, strerror(-ret));
 		claimed = !ret;
-		unlink(h->pool_claim_path);
+		/* Unclaimed, the memory is still free for the next arm to take. */
+		if (claimed)
+			unlink(h->pool_claim_path);
 	}
 	if (!claimed)
 		ret = write_baseline(cfg, fs, pool_bytes, NULL, &devices, &platform);

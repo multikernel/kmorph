@@ -958,6 +958,36 @@ static void a_new_pool_claims_the_memory_kept_at_the_takeover(void)
 	config_free(&cfg);
 }
 
+/* A baseline refused for any reason, a CPU the kernel keeps for instance, must not lose the memory. */
+static void a_failed_pool_keeps_the_record_of_the_kept_memory(void)
+{
+	void *tree = fdt_test_granule_tree(4ULL << 20);
+	struct range kept = { 0x40000000, 0x20400000 }, back = { 0, 0 };
+	struct arm_hooks h = hooks;
+	struct mkfs fs = { sysfs };
+	char err[64], claim[512], path[512];
+
+	if (geteuid() == 0)
+		return;
+	setup();
+	snprintf(claim, sizeof(claim), "%s/pool-memory", sysfs);
+	snprintf(path, sizeof(path), "%s/device_tree", sysfs);
+	h.pool_claim_path = claim;
+	CHECK_EQ(pool_claim_write(claim, &kept), 0);
+	config_free(&cfg);
+	config_parse("cpus = 12-15\nmemory = 512MB\nkernel = /boot/vmlinuz\n", &cfg, err, sizeof(err));
+	put("device_tree", tree, fdt_totalsize(tree));
+	free(tree);
+	CHECK_EQ(chmod(path, 0444), 0);
+	CHECK(arm_run(&cfg, "generation-1", &fs, &h) < 0);
+	CHECK_EQ(chmod(path, 0644), 0);
+	CHECK_EQ(pool_claim_read(claim, &back), 0);
+	CHECK_EQ(back.base, kept.base);
+	CHECK_EQ(back.size, kept.size);
+	unlink(claim);
+	config_free(&cfg);
+}
+
 static void arm_refuses_a_pool_baseline_with_an_unknown_device(void)
 {
 	struct mkfs fs = { sysfs };
@@ -1230,6 +1260,7 @@ TEST_MAIN({
 	RUN(arm_initialises_the_pool_when_there_is_none);
 	RUN(new_pool_headroom_is_one_memory_granule);
 	RUN(a_new_pool_claims_the_memory_kept_at_the_takeover);
+	RUN(a_failed_pool_keeps_the_record_of_the_kept_memory);
 	RUN(arm_refuses_a_pool_baseline_with_an_unknown_device);
 	RUN(missing_pool_devices_are_added_by_overlay);
 	RUN(arm_uses_the_configured_initrd_over_the_default);
