@@ -88,7 +88,17 @@ static void console_platform_devices(const struct kmorph_config *cfg, struct str
 
 static bool strlist_has(const struct strlist *l, const char *s);
 
-static int check_pool_fits(const struct pool_view *pool, const struct kmorph_config *cfg)
+static size_t cpu_number(const struct cpulist *machine, uint64_t phys)
+{
+	size_t i;
+
+	for (i = 0; i < machine->count && machine->ids[i] != phys; i++)
+		;
+	return i;
+}
+
+static int check_pool_fits(const struct pool_view *pool, const struct kmorph_config *cfg,
+			   const struct cpulist *machine)
 {
 	struct strlist platform;
 	size_t i;
@@ -104,8 +114,8 @@ static int check_pool_fits(const struct pool_view *pool, const struct kmorph_con
 
 	for (i = 0; i < cfg->cpus.count; i++) {
 		if (!cpulist_has(&pool->free_cpus, cfg->cpus.ids[i])) {
-			log_err("CPU %llu is not free in the pool",
-				(unsigned long long)cfg->cpus.ids[i]);
+			log_err("CPU %zu is not free in the pool",
+				cpu_number(machine, cfg->cpus.ids[i]));
 			return -ENOENT;
 		}
 	}
@@ -244,8 +254,8 @@ int arm_pool_add_devices(const struct kmorph_config *cfg, const struct mkfs *fs,
 }
 
 /* Use the pool when there is one, create it from the config when there is none. */
-static int ensure_pool(const struct kmorph_config *cfg, const struct mkfs *fs,
-		       const struct arm_hooks *h)
+static int ensure_pool(const struct kmorph_config *cfg, const struct cpulist *machine,
+		       const struct mkfs *fs, const struct arm_hooks *h)
 {
 	struct pool_view pool;
 	void *tree;
@@ -265,7 +275,7 @@ static int ensure_pool(const struct kmorph_config *cfg, const struct mkfs *fs,
 		log_err("cannot parse the pool device tree: %s", strerror(-ret));
 		return ret;
 	}
-	ret = check_pool_fits(&pool, cfg);
+	ret = check_pool_fits(&pool, cfg, machine);
 	if (!ret)
 		ret = arm_pool_add_devices(cfg, fs, &pool);
 	pool_view_free(&pool);
@@ -294,49 +304,79 @@ static void read_crash_layout(const struct arm_hooks *h, struct vmcore_info *vi)
 }
 
 /*
- * A kernel that took over booted without ACPI, from a host tree; the
- * machine is still the one that tree describes, so its CPUs are passed on
- * as they came.
+ * Every CPU on the machine, sorted by physical id: from the firmware's
+ * MADT, else the host tree a kernel that took over booted from, else the
+ * firmware device tree. Each kernel in a chain reads the same set, so a
+ * CPU's position in it is the same in every generation.
  */
-static void inherit_cpus_from_own_host_tree(const struct arm_hooks *h, struct host_tree *ht)
+static int read_machine_cpus(const struct arm_hooks *h, struct cpulist *out)
 {
 	struct host_tree own;
+	int ret;
 
-	if (!h->own_host_tree || host_tree_read(h->own_host_tree, &own))
-		return;
-	log_info("no ACPI tables; machine CPUs from %s", h->own_host_tree);
-	ht->cpus = own.cpus;
-	own.cpus = (struct cpulist){ NULL, 0 };
-	host_tree_free(&own);
+	*out = (struct cpulist){ NULL, 0 };
+	ret = madt_read_cpus(h->madt_path, out);
+	if (ret == -ENOENT && h->own_host_tree && !host_tree_read(h->own_host_tree, &own)) {
+		log_info("no ACPI tables; machine CPUs from %s", h->own_host_tree);
+		*out = own.cpus;
+		own.cpus = (struct cpulist){ NULL, 0 };
+		host_tree_free(&own);
+	}
+	if (ret == -ENOENT && !out->count && h->dt_cpus && !devtree_read_cpus(h->dt_cpus, out))
+		log_info("no ACPI tables; machine CPUs from %s", h->dt_cpus);
+	if (!out->count) {
+		log_err("no machine CPU list: %s unreadable (%s)", h->madt_path, strerror(-ret));
+		cpulist_free(out);
+		return -ENOENT;
+	}
+	cpulist_normalize(out);
+	return 0;
 }
 
-/* A machine booted from a firmware device tree has no MADT; its /cpus names every CPU. */
-static void cpus_from_firmware_tree(const struct arm_hooks *h, struct host_tree *ht)
+/* The config numbers CPUs by their position in the machine's list; the kernel wants physical ids. */
+static int resolve_cpus(const struct cpulist *numbers, const struct cpulist *machine,
+			struct cpulist *out)
 {
-	if (h->dt_cpus && !devtree_read_cpus(h->dt_cpus, &ht->cpus))
-		log_info("no ACPI tables; machine CPUs from %s", h->dt_cpus);
+	char line[256];
+	size_t i, n = 0;
+
+	out->ids = calloc(numbers->count, sizeof(*out->ids));
+	if (!out->ids)
+		return -ENOMEM;
+	out->count = numbers->count;
+	for (i = 0; i < numbers->count; i++) {
+		if (numbers->ids[i] >= machine->count) {
+			log_err("no CPU %llu: the machine has CPUs 0-%zu",
+				(unsigned long long)numbers->ids[i], machine->count - 1);
+			cpulist_free(out);
+			return -ENOENT;
+		}
+		out->ids[i] = machine->ids[numbers->ids[i]];
+		if (n < sizeof(line))
+			n += snprintf(line + n, sizeof(line) - n, "%s%llu=%#llx", i ? " " : "",
+				      (unsigned long long)numbers->ids[i],
+				      (unsigned long long)out->ids[i]);
+	}
+	log_info("successor CPUs by physical id: %s", line);
+	return 0;
 }
 
 /*
- * The host tree the successor boots with: every CPU on the machine (from
- * the firmware's MADT or device tree), the machine's RAM, and its PCI
- * devices. The successor can only fence and adopt what is named here.
+ * The host tree the successor boots with: every CPU on the machine, the
+ * machine's RAM, and its PCI devices. The successor can only fence and
+ * adopt what is named here.
  */
 static int build_host_tree(const struct kmorph_config *cfg, const struct arm_hooks *h,
-			   struct host_tree *ht)
+			   const struct cpulist *machine, struct host_tree *ht)
 {
 	int ret;
 
 	memset(ht, 0, sizeof(*ht));
-	ret = madt_read_cpus(h->madt_path, &ht->cpus);
-	if (ret == -ENOENT)
-		inherit_cpus_from_own_host_tree(h, ht);
-	if (ret == -ENOENT && !ht->cpus.count)
-		cpus_from_firmware_tree(h, ht);
-	if (!ht->cpus.count) {
-		log_err("no machine CPU list: %s unreadable (%s)", h->madt_path, strerror(-ret));
-		return -ENOENT;
-	}
+	ht->cpus.ids = malloc(machine->count * sizeof(*ht->cpus.ids));
+	if (!ht->cpus.ids)
+		return -ENOMEM;
+	memcpy(ht->cpus.ids, machine->ids, machine->count * sizeof(*ht->cpus.ids));
+	ht->cpus.count = machine->count;
 
 	ret = iomem_system_ram(h->iomem_path, &ht->ram);
 	if (ret || !ht->ram.count) {
@@ -356,8 +396,8 @@ static int build_host_tree(const struct kmorph_config *cfg, const struct arm_hoo
 	return 0;
 }
 
-static int create_instance(const struct kmorph_config *cfg, const char *name,
-			   const struct mkfs *fs, const struct arm_hooks *h)
+static int create_instance(const struct kmorph_config *cfg, const struct cpulist *machine,
+			   const char *name, const struct mkfs *fs, const struct arm_hooks *h)
 {
 	struct strlist platform;
 	struct host_tree ht;
@@ -366,7 +406,7 @@ static int create_instance(const struct kmorph_config *cfg, const char *name,
 	int tx, ret;
 
 	console_platform_devices(cfg, &platform);
-	ret = build_host_tree(cfg, h, &ht);
+	ret = build_host_tree(cfg, h, machine, &ht);
 	if (ret)
 		return ret;
 	ret = dt_build_instance_create(name, &cfg->cpus, cfg->memory, &cfg->devices,
@@ -718,6 +758,7 @@ int arm_run(const struct kmorph_config *cfg, const char *name, const struct mkfs
 	    const struct arm_hooks *h)
 {
 	struct kmorph_config resolved;
+	struct cpulist machine, cpus = { NULL, 0 };
 	struct strlist devices;
 	char earlycon[128];
 	uint32_t id;
@@ -732,14 +773,23 @@ int arm_run(const struct kmorph_config *cfg, const char *name, const struct mkfs
 		return ret;
 	if (*earlycon)
 		log_info("%s shows the successor's kernel messages through %s", cfg->console, earlycon);
-	ret = resolve_devices(cfg, h, &devices);
+	ret = read_machine_cpus(h, &machine);
 	if (ret)
 		return ret;
+	ret = resolve_devices(cfg, h, &devices);
+	if (ret) {
+		cpulist_free(&machine);
+		return ret;
+	}
+	ret = resolve_cpus(&cfg->cpus, &machine, &cpus);
+	if (ret)
+		goto out;
 	resolved = *cfg;
 	resolved.devices = devices;
+	resolved.cpus = cpus;
 	cfg = &resolved;
 
-	ret = ensure_pool(cfg, fs, h);
+	ret = ensure_pool(cfg, &machine, fs, h);
 	if (ret)
 		goto out;
 	initrd_fd = successor_initrd(cfg, h);
@@ -747,7 +797,7 @@ int arm_run(const struct kmorph_config *cfg, const char *name, const struct mkfs
 		ret = initrd_fd;
 		goto out;
 	}
-	ret = create_instance(cfg, name, fs, h);
+	ret = create_instance(cfg, &machine, name, fs, h);
 	if (ret)
 		goto out;
 	ret = mkfs_instance_id(fs, name, &id);
@@ -767,6 +817,8 @@ out:
 	if (initrd_fd >= 0)
 		close(initrd_fd);
 	strlist_free(&devices);
+	cpulist_free(&cpus);
+	cpulist_free(&machine);
 	return ret;
 }
 

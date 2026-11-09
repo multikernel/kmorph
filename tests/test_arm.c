@@ -112,7 +112,7 @@ static void mkdir_rel(const char *rel)
 static void put_root_tree(uint64_t free_bytes)
 {
 	void *fdt = fdt_test_begin(2048);
-	uint64_t free_cpus[] = { 12, 13, 14, 15 };
+	uint64_t free_cpus[] = { 16, 32, 48, 64 };
 
 	fdt_begin_node(fdt, "resources");
 	fdt_test_u64_array(fdt, "cpus-available", free_cpus, 4);
@@ -217,7 +217,7 @@ static void setup(void)
 {
 	char err[64];
 
-	config_parse("cpus = 12-15\nmemory = 4GB\n"
+	config_parse("cpus = 1-4\nmemory = 4GB\n"
 		     "kernel = /boot/vmlinuz\ncmdline = quiet\n", &cfg, err, sizeof(err));
 	memset(&calls, 0, sizeof(calls));
 	put_image();
@@ -232,10 +232,10 @@ static void setup(void)
 	put("instances/generation-1/status", "active\n", 7);
 	put_root_tree(8ULL << 30);
 	{
-		const uint8_t apics[] = { 0, 1, 2, 3 };
+		const uint8_t apics[] = { 64, 0, 16, 32, 48 };
 		static const char iomem[] = "00100000-7ffdbfff : System RAM\n";
 
-		put_madt(apics, 4);
+		put_madt(apics, 5);
 		CHECK_EQ(file_write(iomem_path, iomem, sizeof(iomem) - 1), 0);
 	}
 }
@@ -283,7 +283,7 @@ static void dump_config_relaxes_the_successors_devmem(void)
 
 	setup();
 	config_free(&cfg);
-	config_parse("cpus = 12\nmemory = 1GB\nkernel = /boot/vmlinuz\ncmdline = quiet\n"
+	config_parse("cpus = 1\nmemory = 1GB\nkernel = /boot/vmlinuz\ncmdline = quiet\n"
 		     "dump = /var/crash/vmcore\n", &cfg, err, sizeof(err));
 	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &hooks), 0);
 	CHECK_STREQ(calls.cmdline, "quiet iomem=relaxed");
@@ -291,7 +291,7 @@ static void dump_config_relaxes_the_successors_devmem(void)
 
 	setup();
 	config_free(&cfg);
-	config_parse("cpus = 12\nmemory = 1GB\nkernel = /boot/vmlinuz\ndump = /var/crash/vmcore\n",
+	config_parse("cpus = 1\nmemory = 1GB\nkernel = /boot/vmlinuz\ndump = /var/crash/vmcore\n",
 		     &cfg, err, sizeof(err));
 	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &hooks), 0);
 	CHECK_STREQ(calls.cmdline, "iomem=relaxed");
@@ -299,7 +299,7 @@ static void dump_config_relaxes_the_successors_devmem(void)
 
 	setup();
 	config_free(&cfg);
-	config_parse("cpus = 12\nmemory = 1GB\nkernel = /boot/vmlinuz\n"
+	config_parse("cpus = 1\nmemory = 1GB\nkernel = /boot/vmlinuz\n"
 		     "cmdline = iomem=relaxed quiet\ndump = /var/crash/vmcore\n",
 		     &cfg, err, sizeof(err));
 	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &hooks), 0);
@@ -317,7 +317,7 @@ static void arm_passes_devices_to_the_instance(void)
 
 	setup();
 	config_free(&cfg);
-	config_parse("cpus = 12\nmemory = 1GB\nkernel = /boot/vmlinuz\ndevices = 0000:09:00.0\n",
+	config_parse("cpus = 1\nmemory = 1GB\nkernel = /boot/vmlinuz\ndevices = 0000:09:00.0\n",
 		     &cfg, err, sizeof(err));
 	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &hooks), 0);
 	dtbo = read_blob("overlays/new", &len);
@@ -344,21 +344,19 @@ static int chosen_host_tree(const void *dtbo)
 static void arm_hands_over_a_host_tree_from_firmware_and_sysfs(void)
 {
 	struct mkfs fs = { sysfs };
-	const uint8_t apics[] = { 0, 1, 2, 3 };
 	static const char iomem[] = "00001000-0009fbff : System RAM\n00100000-7ffdbfff : System RAM\n";
 	void *dtbo;
 	size_t len;
 	int ht, node, dev;
 
 	setup();
-	put_madt(apics, 4);
 	CHECK_EQ(file_write(iomem_path, iomem, sizeof(iomem) - 1), 0);
 	put_pci_device("0000:09:00.0", "0x1af4\n", "0x1041\n");
 	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &hooks), 0);
 	dtbo = read_blob("overlays/new", &len);
 	ht = chosen_host_tree(dtbo);
 	CHECK(ht >= 0);
-	CHECK_EQ(fdt_test_get_u64(dtbo, ht, "cpus", 3), 3);
+	CHECK_EQ(fdt_test_get_u64(dtbo, ht, "cpus", 4), 64);
 	node = fdt_subnode_offset(dtbo, ht, "memory@100000");
 	CHECK(node >= 0);
 	CHECK_EQ(fdt_test_get_u64(dtbo, node, "reg", 1), 0x7ffdc000 - 0x100000);
@@ -417,7 +415,7 @@ static void arm_records_the_crash_layout_in_the_host_tree(void)
 
 	setup();
 	config_free(&cfg);
-	config_parse("cpus = 12-15\nmemory = 4GB\nkernel = /boot/vmlinuz\ndump = /var/crash/vmcore\n",
+	config_parse("cpus = 1-4\nmemory = 4GB\nkernel = /boot/vmlinuz\ndump = /var/crash/vmcore\n",
 		     &cfg, err, sizeof(err));
 	put("vmcoreinfo", "0x000000007ffd1000 1000\n", 24);
 	put_cpu_note(0, "7fc01000\n");
@@ -466,7 +464,7 @@ static void arm_without_crash_support_omits_the_vmcore_node(void)
 
 	setup();
 	config_free(&cfg);
-	config_parse("cpus = 12-15\nmemory = 4GB\nkernel = /boot/vmlinuz\ndump = /var/crash/vmcore\n",
+	config_parse("cpus = 1-4\nmemory = 4GB\nkernel = /boot/vmlinuz\ndump = /var/crash/vmcore\n",
 		     &cfg, err, sizeof(err));
 	unlink(vmcoreinfo_path);
 	unlink(kcore_path);
@@ -501,7 +499,8 @@ static void arm_refuses_to_proceed_without_a_host_tree(void)
 
 static void put_own_host_tree(void)
 {
-	fdt64_t cpus[] = { cpu_to_fdt64(0), cpu_to_fdt64(1), cpu_to_fdt64(2) };
+	fdt64_t cpus[] = { cpu_to_fdt64(0), cpu_to_fdt64(16), cpu_to_fdt64(32), cpu_to_fdt64(48),
+			   cpu_to_fdt64(64) };
 	char path[700];
 
 	mkdir(own_host_tree, 0755);
@@ -536,8 +535,8 @@ static void arm_without_acpi_hands_over_its_own_host_tree(void)
 	remove_own_host_tree();
 	dtbo = read_blob("overlays/new", &size);
 	ht = chosen_host_tree(dtbo);
-	CHECK_EQ(fdt_getprop(dtbo, ht, "cpus", &len) ? len : 0, 24);
-	CHECK_EQ(fdt_test_get_u64(dtbo, ht, "cpus", 2), 2);
+	CHECK_EQ(fdt_getprop(dtbo, ht, "cpus", &len) ? len : 0, 40);
+	CHECK_EQ(fdt_test_get_u64(dtbo, ht, "cpus", 2), 32);
 	free(dtbo);
 	config_free(&cfg);
 }
@@ -563,12 +562,15 @@ static void arm_without_acpi_reads_the_firmware_tree_cpus(void)
 	fdt32_t r0 = cpu_to_fdt32(0), r1 = cpu_to_fdt32(1);
 	fdt32_t r100[2] = { cpu_to_fdt32(0), cpu_to_fdt32(0x100) };
 	struct mkfs fs = { sysfs };
-	char cmd[700];
+	char cmd[700], err[64];
 	void *dtbo;
 	size_t size;
 	int ht, len;
 
 	setup();
+	config_free(&cfg);
+	config_parse("cpus = 1\nmemory = 1GB\nkernel = /boot/vmlinuz\n", &cfg, err, sizeof(err));
+	put("device_tree", "", 0);
 	unlink(madt_path);
 	mkdir_rel("dtcpus");
 	put("dtcpus/#address-cells", &one, sizeof(one));
@@ -586,6 +588,9 @@ static void arm_without_acpi_reads_the_firmware_tree_cpus(void)
 	config_free(&cfg);
 
 	setup();
+	config_free(&cfg);
+	config_parse("cpus = 0\nmemory = 1GB\nkernel = /boot/vmlinuz\n", &cfg, err, sizeof(err));
+	put("device_tree", "", 0);
 	unlink(madt_path);
 	put("dtcpus/#address-cells", &two, sizeof(two));
 	put_dt_cpu("cpu@0", "cpu", r100, sizeof(r100));
@@ -629,7 +634,7 @@ static void parse_console_config(void)
 
 	config_free(&cfg);
 	snprintf(text, sizeof(text),
-		 "cpus = 12\nmemory = 1GB\nkernel = /boot/vmlinuz\nconsole = ttyS0\nconsole_login = %s\n",
+		 "cpus = 1\nmemory = 1GB\nkernel = /boot/vmlinuz\nconsole = ttyS0\nconsole_login = %s\n",
 		 login_path);
 	CHECK_EQ(config_parse(text, &cfg, err, sizeof(err)), 0);
 	put_tty("ttyS0", "4\n", "0\n", "0x3F8\n");
@@ -650,7 +655,7 @@ static void console_puts_kernel_messages_on_the_line_through_earlycon(void)
 	size_t len;
 
 	setup();
-	parse_config("cpus = 12\nmemory = 1GB\nkernel = /boot/vmlinuz\ncmdline = quiet\n"
+	parse_config("cpus = 1\nmemory = 1GB\nkernel = /boot/vmlinuz\ncmdline = quiet\n"
 		     "console = ttyAMA0\n");
 	put_tty("ttyAMA0", "32\n", "3\n", "0x9000000\n");
 	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &hooks), 0);
@@ -666,7 +671,7 @@ static void an_early_console_in_cmdline_wins(void)
 	struct mkfs fs = { sysfs };
 
 	setup();
-	parse_config("cpus = 12\nmemory = 1GB\nkernel = /boot/vmlinuz\n"
+	parse_config("cpus = 1\nmemory = 1GB\nkernel = /boot/vmlinuz\n"
 		     "cmdline = earlyprintk=serial,ttyS0,115200 keep_bootcon\nconsole = ttyAMA0\n");
 	put_tty("ttyAMA0", "32\n", "3\n", "0x9000000\n");
 	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &hooks), 0);
@@ -679,7 +684,7 @@ static void console_refuses_a_placeholder_port(void)
 	struct mkfs fs = { sysfs };
 
 	setup();
-	parse_config("cpus = 12\nmemory = 1GB\nkernel = /boot/vmlinuz\nconsole = ttyS1\n");
+	parse_config("cpus = 1\nmemory = 1GB\nkernel = /boot/vmlinuz\nconsole = ttyS1\n");
 	put_tty("ttyS1", "0\n", "0\n", "0x0\n");
 	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &hooks), -ENODEV);
 	CHECK_STREQ(calls.seq, "");
@@ -692,7 +697,7 @@ static void a_login_needs_an_8250_uart(void)
 	char text[1024];
 
 	setup();
-	snprintf(text, sizeof(text), "cpus = 12\nmemory = 1GB\nkernel = /boot/vmlinuz\n"
+	snprintf(text, sizeof(text), "cpus = 1\nmemory = 1GB\nkernel = /boot/vmlinuz\n"
 		 "console = ttyAMA0\nconsole_login = %s\n", login_path);
 	parse_config(text);
 	put_tty("ttyAMA0", "32\n", "3\n", "0x9000000\n");
@@ -707,7 +712,7 @@ static void a_successor_without_the_tty_hands_on_its_own_earlycon(void)
 	struct mkfs fs = { sysfs };
 
 	setup();
-	parse_config("cpus = 12\nmemory = 1GB\nkernel = /boot/vmlinuz\nconsole = ttyAMA7\n");
+	parse_config("cpus = 1\nmemory = 1GB\nkernel = /boot/vmlinuz\nconsole = ttyAMA7\n");
 	unlink(own_cmdline);
 	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &hooks), -ENOENT);
 	CHECK_STREQ(calls.seq, "");
@@ -722,7 +727,7 @@ static void a_successor_without_the_tty_hands_on_its_own_earlycon(void)
 static void put_root_tree_with_serial(void)
 {
 	void *fdt = fdt_test_begin(2048);
-	uint64_t free_cpus[] = { 12, 13, 14, 15 };
+	uint64_t free_cpus[] = { 16, 32, 48, 64 };
 
 	fdt_begin_node(fdt, "resources");
 	fdt_test_u64_array(fdt, "cpus-available", free_cpus, 4);
@@ -807,14 +812,14 @@ static void arm_copies_its_own_cmdline_under_the_configured_one(void)
 	struct mkfs fs = { sysfs };
 
 	setup();
-	parse_config("cpus = 12\nmemory = 1GB\nkernel = /boot/vmlinuz\n"
+	parse_config("cpus = 1\nmemory = 1GB\nkernel = /boot/vmlinuz\n"
 		     "cmdline = loglevel=7 rd.timeout=30\ncmdline_drop = splash\n");
 	CHECK_EQ(file_write(own_cmdline, own, sizeof(own) - 1), 0);
 	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &hooks), 0);
 	CHECK_STREQ(calls.cmdline, "root=UUID=1234 ro quiet net.ifnames=0 loglevel=7 rd.timeout=30 "
 		    "rd.retry=2147483647 rootdelay=2147483647");
 
-	parse_config("cpus = 12\nmemory = 1GB\nkernel = /boot/vmlinuz\n"
+	parse_config("cpus = 1\nmemory = 1GB\nkernel = /boot/vmlinuz\n"
 		     "cmdline = quiet\ncmdline_drop = *\n");
 	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &hooks), 0);
 	CHECK_STREQ(calls.cmdline, "quiet");
@@ -829,7 +834,18 @@ static void arm_refuses_cpus_outside_the_pool(void)
 
 	setup();
 	config_free(&cfg);
-	config_parse("cpus = 12-16\nmemory = 1GB\nkernel = /boot/vmlinuz\n", &cfg, err, sizeof(err));
+	config_parse("cpus = 0-4\nmemory = 1GB\nkernel = /boot/vmlinuz\n", &cfg, err, sizeof(err));
+	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &hooks), -ENOENT);
+	CHECK_STREQ(calls.seq, "");
+	config_free(&cfg);
+}
+
+static void arm_refuses_cpus_the_machine_lacks(void)
+{
+	struct mkfs fs = { sysfs };
+
+	setup();
+	parse_config("cpus = 4-5\nmemory = 1GB\nkernel = /boot/vmlinuz\n");
 	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &hooks), -ENOENT);
 	CHECK_STREQ(calls.seq, "");
 	config_free(&cfg);
@@ -856,7 +872,7 @@ static void arm_initialises_the_pool_when_there_is_none(void)
 
 	setup();
 	config_free(&cfg);
-	config_parse("cpus = 12-15\nmemory = 4GB\nkernel = /boot/vmlinuz\ndevices = 0000:09:00.0\n",
+	config_parse("cpus = 1-4\nmemory = 4GB\nkernel = /boot/vmlinuz\ndevices = 0000:09:00.0\n",
 		     &cfg, err, sizeof(err));
 	put_pci_device("0000:09:00.0", "0x1af4\n", "0x1041\n");
 	put("device_tree", "", 0);
@@ -866,7 +882,7 @@ static void arm_initialises_the_pool_when_there_is_none(void)
 	CHECK_EQ(fdtutil_check(dtb, len), 0);
 	res = fdt_path_offset(dtb, "/resources");
 	CHECK(res >= 0);
-	CHECK_EQ(fdt_test_get_u64(dtb, res, "cpus", 0), 12);
+	CHECK_EQ(fdt_test_get_u64(dtb, res, "cpus", 0), 16);
 	/* A kernel publishing no memory granule gets a memory block of headroom. */
 	CHECK_EQ(fdt_test_get_u64(dtb, fdt_subnode_offset(dtb, res, "memory@0"), "size", 0),
 		 (4ULL << 30) + (128ULL << 20));
@@ -890,7 +906,7 @@ static void new_pool_headroom_is_one_memory_granule(void)
 
 	setup();
 	config_free(&cfg);
-	config_parse("cpus = 12-15\nmemory = 4GB\nkernel = /boot/vmlinuz\n", &cfg, err, sizeof(err));
+	config_parse("cpus = 1-4\nmemory = 4GB\nkernel = /boot/vmlinuz\n", &cfg, err, sizeof(err));
 	put("device_tree", tree, fdt_totalsize(tree));
 	free(tree);
 	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &hooks), 0);
@@ -918,7 +934,7 @@ static void a_new_pool_claims_the_memory_kept_at_the_takeover(void)
 	h.pool_claim_path = claim;
 	CHECK_EQ(pool_claim_write(claim, &kept), 0);
 	config_free(&cfg);
-	config_parse("cpus = 12-15\nmemory = 512MB\nkernel = /boot/vmlinuz\n", &cfg, err, sizeof(err));
+	config_parse("cpus = 1-4\nmemory = 512MB\nkernel = /boot/vmlinuz\n", &cfg, err, sizeof(err));
 	put("device_tree", tree, fdt_totalsize(tree));
 	free(tree);
 	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &h), 0);
@@ -950,7 +966,7 @@ static void a_failed_pool_keeps_the_record_of_the_kept_memory(void)
 	h.pool_claim_path = claim;
 	CHECK_EQ(pool_claim_write(claim, &kept), 0);
 	config_free(&cfg);
-	config_parse("cpus = 12-15\nmemory = 512MB\nkernel = /boot/vmlinuz\n", &cfg, err, sizeof(err));
+	config_parse("cpus = 1-4\nmemory = 512MB\nkernel = /boot/vmlinuz\n", &cfg, err, sizeof(err));
 	put("device_tree", tree, fdt_totalsize(tree));
 	free(tree);
 	CHECK_EQ(chmod(path, 0444), 0);
@@ -970,7 +986,7 @@ static void arm_refuses_a_pool_baseline_with_an_unknown_device(void)
 
 	setup();
 	config_free(&cfg);
-	config_parse("cpus = 12\nmemory = 1GB\nkernel = /boot/vmlinuz\ndevices = 0000:0b:00.0\n",
+	config_parse("cpus = 1\nmemory = 1GB\nkernel = /boot/vmlinuz\ndevices = 0000:0b:00.0\n",
 		     &cfg, err, sizeof(err));
 	put("device_tree", "", 0);
 	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &hooks), -ENOENT);
@@ -990,7 +1006,7 @@ static void missing_pool_devices_are_added_by_overlay(void)
 
 	setup();
 	config_free(&cfg);
-	config_parse("cpus = 12\nmemory = 1GB\nkernel = /boot/vmlinuz\n"
+	config_parse("cpus = 1\nmemory = 1GB\nkernel = /boot/vmlinuz\n"
 		     "devices = 0000:09:00.0, 0000:0a:00.0\n", &cfg, err, sizeof(err));
 	CHECK_EQ(arm_pool_add_devices(&cfg, &fs, &pool), 1);
 	dtbo = read_blob("overlays/new", &len);
@@ -1005,7 +1021,7 @@ static void missing_pool_devices_are_added_by_overlay(void)
 
 	put("overlays/new", "", 0);
 	config_free(&cfg);
-	config_parse("cpus = 12\nmemory = 1GB\nkernel = /boot/vmlinuz\ndevices = 0000:09:00.0\n",
+	config_parse("cpus = 1\nmemory = 1GB\nkernel = /boot/vmlinuz\ndevices = 0000:09:00.0\n",
 		     &cfg, err, sizeof(err));
 	CHECK_EQ(arm_pool_add_devices(&cfg, &fs, &pool), 0);
 	dtbo = read_blob("overlays/new", &len);
@@ -1075,7 +1091,7 @@ static void device_names_resolve_to_pci_addresses(void)
 	unlink(path);
 	CHECK_EQ(symlink(target, path), 0);
 	config_free(&cfg);
-	config_parse("cpus = 12\nmemory = 1GB\nkernel = /boot/vmlinuz\ndevices = eth9\n",
+	config_parse("cpus = 1\nmemory = 1GB\nkernel = /boot/vmlinuz\ndevices = eth9\n",
 		     &cfg, err, sizeof(err));
 	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &hooks), 0);
 	CHECK_STREQ(cfg.devices.items[0], "eth9");
@@ -1089,7 +1105,7 @@ static void device_names_resolve_to_pci_addresses(void)
 
 	config_free(&cfg);
 	memset(&calls, 0, sizeof(calls));
-	config_parse("cpus = 12\nmemory = 1GB\nkernel = /boot/vmlinuz\ndevices = nosuch0\n",
+	config_parse("cpus = 1\nmemory = 1GB\nkernel = /boot/vmlinuz\ndevices = nosuch0\n",
 		     &cfg, err, sizeof(err));
 	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &hooks), -ENOENT);
 	CHECK_STREQ(calls.seq, "");
@@ -1103,7 +1119,7 @@ static void arm_needs_kernel_cpus_and_memory(void)
 
 	setup();
 	config_free(&cfg);
-	config_parse("cpus = 12\nmemory = 1GB\n", &cfg, err, sizeof(err));
+	config_parse("cpus = 1\nmemory = 1GB\n", &cfg, err, sizeof(err));
 	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &hooks), -EINVAL);
 	config_free(&cfg);
 }
@@ -1177,7 +1193,7 @@ static void arm_hands_the_network_identity_to_the_successor(void)
 
 	setup();
 	config_free(&cfg);
-	config_parse("cpus = 12-15\nmemory = 4GB\n"
+	config_parse("cpus = 1-4\nmemory = 4GB\n"
 		     "kernel = /boot/vmlinuz\ndevices = 0000:00:1f.6\n", &cfg, err, sizeof(err));
 	put_pci_device("0000:00:1f.6", "0x8086", "0x15b8");
 	h.net_snapshot = fake_net_snapshot;
@@ -1230,6 +1246,7 @@ TEST_MAIN({
 	RUN(a_successor_without_the_tty_hands_on_its_own_earlycon);
 	RUN(arm_copies_its_own_cmdline_under_the_configured_one);
 	RUN(arm_refuses_cpus_outside_the_pool);
+	RUN(arm_refuses_cpus_the_machine_lacks);
 	RUN(arm_refuses_more_memory_than_free);
 	RUN(arm_initialises_the_pool_when_there_is_none);
 	RUN(new_pool_headroom_is_one_memory_granule);

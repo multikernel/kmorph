@@ -197,7 +197,7 @@ else has a default. `kmorph.conf.example` lists every key.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `cpus` | | CPUs for the successor, as physical ids the kernel uses (APIC ids on x86, MPIDRs on arm64), e.g. `1` or `12-15,20`. |
+| `cpus` | | CPUs for the successor, e.g. `1` or `12-15,20`. CPU *n* is the *n*-th of the machine's CPUs in physical id order (APIC id on x86, MPIDR on arm64), counting from 0, so the same number names the same CPU in every generation. `kmorph arm` prints the physical ids. |
 | `memory` | | Memory for the successor, e.g. `128MB`, `4GB`. |
 | `kernel` | | Kernel image: an ELF vmlinux, or a bzImage from which the vmlinux is extracted; an Image on arm64. |
 | `initrd` | | An image of the operator's own, loaded as it is in place of the one kmorph builds. See [The successor image](#the-successor-image). |

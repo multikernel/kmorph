@@ -15,8 +15,10 @@ kernel  = /boot/vmlinuz
 # mkinitramfs when it is missing or stale.
 #initrd = /boot/successor.img
 
-# CPUs for the successor, as physical ids (APIC ids on x86, MPIDRs on
-# arm64), e.g. 1 or 12-15,20.
+# CPUs for the successor, e.g. 1 or 12-15,20. CPU n is the n-th of the
+# machine's CPUs in physical id order (APIC id on x86, MPIDR on arm64),
+# counting from 0, so the same number names the same CPU in every
+# generation. kmorph arm prints the physical ids.
 cpus    = 1
 
 # Memory for the successor, e.g. 512MB or 4GB. It must hold the unpacked
