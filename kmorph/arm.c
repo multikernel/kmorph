@@ -637,7 +637,7 @@ static int successor_initrd(const struct kmorph_config *cfg, const struct arm_ho
 	ret = file_read(path, &image, &len);
 	if (ret) {
 		log_err("cannot read successor image %s: %s%s", path, strerror(-ret),
-			cfg->initrd ? "" : "; 'kmorph init' builds it");
+			cfg->initrd ? "" : "; kmorph-mkimage builds it");
 		return ret;
 	}
 	if (arm_stale_source(path, stale, sizeof(stale)))
