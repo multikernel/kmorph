@@ -22,6 +22,7 @@
 #include "kmorph/madt.h"
 #include "kmorph/memblock.h"
 #include "kmorph/netsnap.h"
+#include "kmorph/uart.h"
 #include "kmorph/vmlinux.h"
 #include "arm.h"
 
@@ -51,6 +52,7 @@ const struct arm_hooks arm_default_hooks = {
 	.kcore_path = KCORE_PATH,
 	.default_initrd = KMORPH_INITRD_PATH,
 	.class_root = DEVNAME_CLASS_ROOT,
+	.cmdline_path = "/proc/cmdline",
 	.usb_root = DEVNAME_USB_ROOT,
 	.own_host_tree = HOST_TREE_DIR,
 	.dt_cpus = DEVTREE_CPUS,
@@ -417,17 +419,94 @@ static bool cmdline_has_word(const char *cmdline, const char *word)
 	return false;
 }
 
-/* The configured command line, plus what the dump needs; caller frees. */
-static char *successor_cmdline(const struct kmorph_config *cfg)
+/* earlyprintk is x86's own early console, earlycon any architecture's */
+static bool has_early_console(const char *cmdline)
 {
-	const char *base = cfg->cmdline ? cfg->cmdline : "";
-	char *out;
+	static const char *const names[] = { "earlycon", "earlyprintk" };
+	const char *p;
+	size_t i, n;
 
-	if (!cfg->dump || cmdline_has_word(base, DUMP_CMDLINE_PARAM))
-		return cfg->cmdline ? strdup(cfg->cmdline) : NULL;
-	if (asprintf(&out, "%s%s" DUMP_CMDLINE_PARAM, base, *base ? " " : "") < 0)
-		return NULL;
-	return out;
+	if (!cmdline)
+		return false;
+	for (i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+		n = strlen(names[i]);
+		for (p = cmdline; (p = strstr(p, names[i])); p += n)
+			if ((p == cmdline || p[-1] == ' ') &&
+			    (p[n] == '\0' || p[n] == ' ' || p[n] == '='))
+				return true;
+	}
+	return false;
+}
+
+/*
+ * The earlycon that puts the successor's kernel messages on the console
+ * line, or an empty one when the command line already has an early
+ * console. A successor arming the next one may have no driver on the
+ * UART and so no tty for it, but it booted with the earlycon to hand on.
+ */
+static int console_earlycon(const struct kmorph_config *cfg, const struct arm_hooks *h,
+			    char *out, size_t len)
+{
+	struct uart_line u;
+	char *own;
+	int ret;
+
+	out[0] = '\0';
+	if (!cfg->console)
+		return 0;
+	ret = uart_read(h->class_root, cfg->console, &u);
+	if (ret == -ENODEV) {
+		log_err("%s is a placeholder with no UART behind it", cfg->console);
+		return ret;
+	}
+	if (has_early_console(cfg->cmdline))
+		return 0;
+	if (!ret)
+		return uart_earlycon(&u, cfg->console_baud, out, len);
+	if (ret == -ENOENT && h->cmdline_path && !file_read_string(h->cmdline_path, &own)) {
+		ret = uart_cmdline_earlycon(own, out, len);
+		free(own);
+		if (!ret)
+			return 0;
+	}
+	log_err("cannot find the UART behind %s; set earlycon= in cmdline", cfg->console);
+	return -ENOENT;
+}
+
+static int append_word(char **s, const char *word)
+{
+	char *n;
+
+	if (*s && cmdline_has_word(*s, word))
+		return 0;
+	if (asprintf(&n, "%s%s%s", *s ? *s : "", *s && **s ? " " : "", word) < 0)
+		return -ENOMEM;
+	free(*s);
+	*s = n;
+	return 0;
+}
+
+/* The configured command line, plus what the console and the dump need. */
+static int successor_cmdline(const struct kmorph_config *cfg, const char *earlycon, char **out)
+{
+	char *s = NULL;
+	int ret = 0;
+
+	if (cfg->cmdline && !(s = strdup(cfg->cmdline)))
+		return -ENOMEM;
+	if (*earlycon) {
+		ret = append_word(&s, earlycon);
+		if (!ret)
+			ret = append_word(&s, "keep_bootcon");
+	}
+	if (!ret && cfg->dump)
+		ret = append_word(&s, DUMP_CMDLINE_PARAM);
+	if (ret) {
+		free(s);
+		return ret;
+	}
+	*out = s;
+	return 0;
 }
 
 static int write_all(int fd, const void *buf, size_t len)
@@ -556,10 +635,9 @@ out:
 }
 
 static int load_and_exec(const struct kmorph_config *cfg, const struct arm_hooks *h, int id,
-			 int initrd_fd)
+			 int initrd_fd, const char *earlycon)
 {
 	int kernel_fd, ret;
-	bool expected;
 	char *cmdline;
 
 	kernel_fd = h->open_kernel(cfg->kernel);
@@ -568,12 +646,11 @@ static int load_and_exec(const struct kmorph_config *cfg, const struct arm_hooks
 		return kernel_fd;
 	}
 
-	expected = cfg->cmdline || cfg->dump;
-	cmdline = successor_cmdline(cfg);
-	if (!cmdline && expected) {
+	ret = successor_cmdline(cfg, earlycon, &cmdline);
+	if (ret) {
 		close(kernel_fd);
-		log_err("cannot build the successor's command line: %s", strerror(ENOMEM));
-		return -ENOMEM;
+		log_err("cannot build the successor's command line: %s", strerror(-ret));
+		return ret;
 	}
 
 	ret = h->kexec_load(kernel_fd, initrd_fd, cmdline, id);
@@ -640,6 +717,7 @@ int arm_run(const struct kmorph_config *cfg, const char *name, const struct mkfs
 {
 	struct kmorph_config resolved;
 	struct strlist devices;
+	char earlycon[128];
 	uint32_t id;
 	int initrd_fd = -1, ret;
 
@@ -647,6 +725,11 @@ int arm_run(const struct kmorph_config *cfg, const char *name, const struct mkfs
 		log_err("config needs kernel, cpus and memory to arm a successor");
 		return -EINVAL;
 	}
+	ret = console_earlycon(cfg, h, earlycon, sizeof(earlycon));
+	if (ret)
+		return ret;
+	if (*earlycon)
+		log_info("%s shows the successor's kernel messages through %s", cfg->console, earlycon);
 	ret = resolve_devices(cfg, h, &devices);
 	if (ret)
 		return ret;
@@ -672,7 +755,7 @@ int arm_run(const struct kmorph_config *cfg, const char *name, const struct mkfs
 	}
 	log_info("instance %s created with id %u", name, id);
 
-	ret = load_and_exec(cfg, h, id, initrd_fd);
+	ret = load_and_exec(cfg, h, id, initrd_fd, earlycon);
 	if (ret) {
 		log_err("successor left in place; run 'kmorph disarm' to remove it");
 		goto out;

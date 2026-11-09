@@ -18,13 +18,13 @@ static char sysfs[] = "/tmp/kmorph-test-arm-XXXXXX";
 static char pci_root[600], block_size[600], madt_path[600], iomem_path[600], dt_cpus[600];
 static char vmcoreinfo_path[600], cpu_root[600], kcore_path[600];
 static char image_path[600], login_path[600], class_root[600], usb_root[600];
-static char own_host_tree[600];
+static char own_host_tree[600], own_cmdline[600];
 
 struct calls {
 	char seq[32];
 	int loaded_id, exec_id, halt_id, unloaded_id;
 	int kernel_fd, initrd_fd;
-	char cmdline[64];
+	char cmdline[256];
 	unsigned char initrd[65536];
 	size_t initrd_len;
 };
@@ -83,6 +83,7 @@ static const struct arm_hooks hooks = {
 	.kcore_path = kcore_path,
 	.default_initrd = image_path,
 	.class_root = class_root,
+	.cmdline_path = own_cmdline,
 	.usb_root = usb_root,
 	.own_host_tree = own_host_tree,
 	.dt_cpus = dt_cpus,
@@ -624,6 +625,25 @@ static void arm_without_acpi_reads_the_firmware_tree_cpus(void)
 	CHECK_EQ(system(cmd), 0);
 }
 
+static void put_tty(const char *tty, const char *type, const char *io_type, const char *base)
+{
+	char rel[128];
+
+	mkdir_rel("class");
+	mkdir_rel("class/tty");
+	snprintf(rel, sizeof(rel), "class/tty/%s", tty);
+	mkdir_rel(rel);
+#define PUT(attr, value) do { \
+	snprintf(rel, sizeof(rel), "class/tty/%s/" attr, tty); \
+	put(rel, value, strlen(value)); \
+} while (0)
+	PUT("type", type);
+	PUT("io_type", io_type);
+	PUT("iomem_base", base);
+	PUT("port", base);
+#undef PUT
+}
+
 static void parse_console_config(void)
 {
 	char text[1024], err[64];
@@ -633,6 +653,7 @@ static void parse_console_config(void)
 		 "cpus = 12\nmemory = 1GB\nkernel = /boot/vmlinuz\nconsole = ttyS0\nconsole_login = %s\n",
 		 login_path);
 	CHECK_EQ(config_parse(text, &cfg, err, sizeof(err)), 0);
+	put_tty("ttyS0", "4\n", "0\n", "0x3F8\n");
 }
 
 static void put_root_tree_with_serial(void)
@@ -713,6 +734,73 @@ static void console_config_refuses_a_pool_without_the_serial_device(void)
 	parse_console_config();
 	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &hooks), -ENOENT);
 	CHECK_STREQ(calls.seq, "");
+	config_free(&cfg);
+}
+
+static void parse_console_line(const char *tty, const char *cmdline)
+{
+	char text[1024], err[64];
+
+	config_free(&cfg);
+	snprintf(text, sizeof(text),
+		 "cpus = 12\nmemory = 1GB\nkernel = /boot/vmlinuz\n%s%s%sconsole = %s\nconsole_login = %s\n",
+		 cmdline ? "cmdline = " : "", cmdline ? cmdline : "", cmdline ? "\n" : "", tty, login_path);
+	CHECK_EQ(config_parse(text, &cfg, err, sizeof(err)), 0);
+}
+
+static void console_puts_kernel_messages_on_the_line_through_earlycon(void)
+{
+	struct mkfs fs = { sysfs };
+
+	setup();
+	put_root_tree_with_serial();
+	parse_console_line("ttyAMA0", "quiet");
+	put_tty("ttyAMA0", "32\n", "3\n", "0x9000000\n");
+	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &hooks), 0);
+	CHECK_STREQ(calls.cmdline, "quiet earlycon=pl011,mmio32,0x9000000,115200 keep_bootcon");
+	config_free(&cfg);
+}
+
+static void an_early_console_in_cmdline_wins(void)
+{
+	struct mkfs fs = { sysfs };
+
+	setup();
+	put_root_tree_with_serial();
+	parse_console_line("ttyAMA0", "earlyprintk=serial,ttyS0,115200 keep_bootcon");
+	put_tty("ttyAMA0", "32\n", "3\n", "0x9000000\n");
+	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &hooks), 0);
+	CHECK_STREQ(calls.cmdline, "earlyprintk=serial,ttyS0,115200 keep_bootcon");
+	config_free(&cfg);
+}
+
+static void console_refuses_a_placeholder_port(void)
+{
+	struct mkfs fs = { sysfs };
+
+	setup();
+	parse_console_line("ttyS1", NULL);
+	put_tty("ttyS1", "0\n", "0\n", "0x0\n");
+	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &hooks), -ENODEV);
+	CHECK_STREQ(calls.seq, "");
+	config_free(&cfg);
+}
+
+static void a_successor_without_the_tty_hands_on_its_own_earlycon(void)
+{
+	static const char own[] = "root=/dev/vda earlycon=pl011,mmio32,0x9000000,115200 keep_bootcon\n";
+	struct mkfs fs = { sysfs };
+
+	setup();
+	put_root_tree_with_serial();
+	parse_console_line("ttyAMA7", NULL);
+	unlink(own_cmdline);
+	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &hooks), -ENOENT);
+	CHECK_STREQ(calls.seq, "");
+	CHECK_EQ(file_write(own_cmdline, own, sizeof(own) - 1), 0);
+	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &hooks), 0);
+	CHECK_STREQ(calls.cmdline, "earlycon=pl011,mmio32,0x9000000,115200 keep_bootcon");
+	unlink(own_cmdline);
 	config_free(&cfg);
 }
 
@@ -1097,6 +1185,7 @@ TEST_MAIN({
 	snprintf(class_root, sizeof(class_root), "%s/class", sysfs);
 	snprintf(usb_root, sizeof(usb_root), "%s/usb", sysfs);
 	snprintf(own_host_tree, sizeof(own_host_tree), "%s/host-tree", sysfs);
+	snprintf(own_cmdline, sizeof(own_cmdline), "%s/cmdline", sysfs);
 	snprintf(dt_cpus, sizeof(dt_cpus), "%s/dtcpus", sysfs);
 	mkdir(cpu_root, 0755);
 	CHECK_EQ(file_write(block_size, "8000000\n", 8), 0);
@@ -1114,6 +1203,10 @@ TEST_MAIN({
 	RUN(console_config_hands_the_serial_device_to_the_successor);
 	RUN(console_config_puts_the_serial_device_in_a_new_pool);
 	RUN(console_config_refuses_a_pool_without_the_serial_device);
+	RUN(console_puts_kernel_messages_on_the_line_through_earlycon);
+	RUN(an_early_console_in_cmdline_wins);
+	RUN(console_refuses_a_placeholder_port);
+	RUN(a_successor_without_the_tty_hands_on_its_own_earlycon);
 	RUN(arm_refuses_cpus_outside_the_pool);
 	RUN(arm_refuses_more_memory_than_free);
 	RUN(arm_initialises_the_pool_when_there_is_none);

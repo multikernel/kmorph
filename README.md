@@ -54,9 +54,10 @@ directly and needs no other tool.
   `CONFIG_MULTIKERNEL_VSOCKETS=y`, with the host tree interface (the
   `multikernel,host-tree` node in instance-create), on x86-64 or arm64.
   `CONFIG_CRASH_DUMP=y` for registers and VMCOREINFO in the dump.
-- In the successor kernel: the multikernel filesystem, the vsock
-  transport, and the serial driver for the [console](#successor-console),
-  built in or as modules the successor image carries.
+- In the successor kernel: the multikernel filesystem and the vsock
+  transport, built in or as modules the successor image carries, and the
+  serial driver for the [console](#successor-console) built in, since
+  earlycon comes up before any module.
 - On the predecessor: root, and `gzip`, `xz`, `zstd` or `lz4` if the kernel
   image is a compressed bzImage rather than an ELF vmlinux.
 - For [standby services](#standby-services): dracut and erofs-utils on the
@@ -100,7 +101,6 @@ production.
    cpus    = 1
    memory  = 128MB
    kernel  = /boot/vmlinuz
-   cmdline = earlyprintk=serial,ttyS0,115200 keep_bootcon
    devices = enp9s0
    console = ttyS0
    console_login = /usr/local/lib/kmorph/sh
@@ -225,13 +225,13 @@ else has a default. `kmorph.conf.example` lists every key.
 | `memory` | | Memory for the successor, e.g. `128MB`, `4GB`. |
 | `kernel` | | Kernel image: an ELF vmlinux, or a bzImage from which the vmlinux is extracted; an Image on arm64. |
 | `initrd` | `/var/lib/kmorph/successor.img` | Initramfs for the successor; the default is where `kmorph init` and `kmorph-mkimage` write. kmorph appends the config to whichever image is used. |
-| `cmdline` | | Kernel command line for the successor. See [Successor console](#successor-console). With `dump` set, kmorph adds `iomem=relaxed`. |
+| `cmdline` | | Kernel command line for the successor. With `console` set, kmorph adds an earlycon for it; see [Successor console](#successor-console). With `dump` set, kmorph adds `iomem=relaxed`. |
 | `devices` | | Devices handed to the successor, comma separated, as PCI addresses (`0000:09:00.0`) or as the names sysfs knows them by: a network interface (`enp61s0f1`), a block device (`nvme0n1`), a framebuffer (`fb0`), a USB bus (`usb1`). A name resolves to the PCI function behind it. The successor owns these from boot, a NIC to be reachable while armed for instance; it adopts every other device at the takeover. |
 | `machine_cpus` | from the firmware | Every CPU on the machine. Set only on a machine with neither ACPI nor a firmware device tree. |
 | `modules` | | Kernel modules the distro image builders add to the successor image, comma separated: the vsock transport when it is a module, drivers for devices in `devices`. Ignored by the `kmorph init` image, which has no module loader. |
 | `standby` | | systemd units the successor runs before the takeover, comma separated. See [Standby services](#standby-services). |
 | `standby_files` | | Further files or directories the standby image carries, such as plugins from a package other than the unit's. |
-| `console` | | Serial line the successor takes over after the takeover, e.g. `ttyS0`. |
+| `console` | | Serial line that shows the successor's kernel messages and, after the takeover, its login, e.g. `ttyS0` or `ttyAMA0`. |
 | `console_baud` | `115200` | Speed of that line. |
 | `console_login` | | Program run on the serial line after the takeover, required with `console`. With the `kmorph init` image it must be a static executable, which `kmorph init` copies in; any other image carries its own. |
 
@@ -409,19 +409,28 @@ A physical NIC still renegotiates its link after the reset that
 
 ## Successor console
 
-When `console` names a serial line, `kmorph arm` places the legacy serial
-device in the pool and hands it to the successor, whose kernel registers it
-at boot. After the takeover kmorphd switches the line to polling, since the
-successor has no interrupt routing for it, and keeps the login program on
-it, so the serial console that showed the predecessor now shows the
-successor's shell.
+When `console` names a serial line, `kmorph arm` reads the UART behind it
+from sysfs and adds an earlycon for it to the successor's command line,
+with `keep_bootcon`, for example
+`earlycon=pl011,mmio32,0x9000000,115200 keep_bootcon` for a `ttyAMA0` or
+`earlycon=uart8250,io,0x3f8,115200 keep_bootcon` for a legacy `ttyS0`.
+earlycon writes to the UART's registers directly, so the successor's
+kernel messages reach the line before and after the takeover without
+a driver or an interrupt. An early console already in `cmdline`, an
+`earlycon=` or an `earlyprintk=`, is left as it is. A successor whose
+UART has no driver, and so no tty, hands on the earlycon it booted with
+when it arms the next one. `kmorph arm` refuses a line with no UART
+behind it, such as an unused `ttyS` placeholder.
 
-Give the successor an early serial console on the same line in its
-`cmdline`, `earlyprintk=serial,ttyS0,115200 keep_bootcon`, so its kernel
-messages reach the serial console before and after the takeover. Do not use
-`console=mktty0`: that console forwards messages to the predecessor and,
-once the predecessor is dead, floods the successor with its own failure
-reports.
+`kmorph arm` also places the legacy serial device in the pool and hands it
+to the successor, whose kernel registers it at boot. After the takeover
+kmorphd switches the line to polling, since the successor has no interrupt
+routing for it, and keeps the login program on it, so the serial console
+that showed the predecessor now shows the successor's shell.
+
+Do not use `console=mktty0` in `cmdline`: that console forwards messages
+to the predecessor and, once the predecessor is dead, floods the successor
+with its own failure reports.
 
 On the serial console the whole event is one continuous stream: the
 predecessor's messages, the successor's boot lines interleaved once armed,

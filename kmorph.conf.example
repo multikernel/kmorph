@@ -20,8 +20,9 @@ cpus    = 1
 # Memory for the successor, e.g. 128MB or 4GB.
 memory  = 128MB
 
-# Kernel command line for the successor.
-#cmdline = earlyprintk=serial,ttyS0,115200 keep_bootcon
+# Kernel command line for the successor. With console set, kmorph adds
+# an earlycon for that line unless this already has an early console.
+#cmdline = quiet
 
 # Devices the successor owns from boot, comma separated: PCI addresses
 # or the names sysfs knows them by (a network interface, a block device,
@@ -64,7 +65,8 @@ memory  = 128MB
 # mastering if it cannot be reset. no: leave it as the crash left it.
 #reset_devices = yes
 
-# Serial line the successor takes over after the crash.
+# Serial line that shows the successor's kernel messages and, after the
+# takeover, its login, e.g. ttyS0 or ttyAMA0.
 #console = ttyS0
 
 # Speed of that line.
