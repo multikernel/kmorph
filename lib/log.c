@@ -13,17 +13,20 @@
 static const char *log_ident = "kmorph";
 static int log_stderr_fd = STDERR_FILENO;
 static int log_kmsg_fd = -1;
+static const char *log_kmsg_path;
 
 void log_init(const char *ident, int stderr_fd, int kmsg_fd)
 {
 	log_ident = ident;
 	log_stderr_fd = stderr_fd;
 	log_kmsg_fd = kmsg_fd;
+	log_kmsg_path = NULL;
 }
 
-void log_open_kmsg(void)
+void log_open_kmsg(const char *path)
 {
-	log_kmsg_fd = open("/dev/kmsg", O_WRONLY | O_CLOEXEC);
+	log_kmsg_fd = open(path, O_WRONLY | O_CLOEXEC);
+	log_kmsg_path = log_kmsg_fd >= 0 ? path : NULL;
 }
 
 static void write_all(int fd, const char *s, size_t len)
@@ -38,6 +41,23 @@ static void write_all(int fd, const char *s, size_t len)
 	}
 }
 
+/*
+ * The kernel keeps ten lines in five seconds per open of /dev/kmsg and
+ * drops the rest while write() still succeeds, so each line gets an open
+ * of its own. The fd kept from the first open serves a root without it.
+ */
+static void write_kmsg(const char *s, size_t len)
+{
+	int fd = log_kmsg_path ? open(log_kmsg_path, O_WRONLY | O_CLOEXEC) : -1;
+
+	if (fd < 0) {
+		write_all(log_kmsg_fd, s, len);
+		return;
+	}
+	write_all(fd, s, len);
+	close(fd);
+}
+
 static void log_line(int priority, const char *level, const char *fmt, va_list ap)
 {
 	char msg[1024], line[1200];
@@ -50,7 +70,7 @@ static void log_line(int priority, const char *level, const char *fmt, va_list a
 	}
 	if (log_kmsg_fd >= 0) {
 		n = snprintf(line, sizeof(line), "<%d>%s: %s%s\n", priority, log_ident, level, msg);
-		write_all(log_kmsg_fd, line, n);
+		write_kmsg(line, n);
 	}
 }
 
