@@ -15,10 +15,10 @@ depends() {
 # Modules the config asks for: the vsock transport when it is one,
 # drivers for devices handed to the successor.
 installkernel() {
-	local mods
+	local conf=${KMORPH_CONF:-/etc/kmorph/kmorph.conf} mods
 
-	[ -f /etc/kmorph/kmorph.conf ] || return 0
-	mods=$(sed -n 's/^modules[[:space:]]*=[[:space:]]*//p' /etc/kmorph/kmorph.conf | tr ',' ' ')
+	[ -f "$conf" ] || return 0
+	mods=$(sed -n 's/^modules[[:space:]]*=[[:space:]]*//p' "$conf" | tr ',' ' ')
 	[ -n "$mods" ] && hostonly='' instmods $mods
 	return 0
 }
@@ -28,10 +28,10 @@ installkernel() {
 # kmorphd mid-takeover, so kmorphd --wait returns, and its unit lets
 # initrd.target through, only once the takeover is done.
 install() {
-	local unit=kmorphd-initrd.service
+	local unit=kmorphd-initrd.service conf=${KMORPH_CONF:-/etc/kmorph/kmorph.conf}
 
 	inst_binary /usr/bin/kmorphd
-	[ -f /etc/kmorph/kmorph.conf ] && inst_simple /etc/kmorph/kmorph.conf
+	[ -f "$conf" ] && inst_simple "$conf" /etc/kmorph/kmorph.conf
 	mkdir -p "$initdir$systemdsystemunitdir/initrd.target.wants"
 	inst_simple "$moddir/$unit" "$systemdsystemunitdir/$unit"
 	ln_r "$systemdsystemunitdir/$unit" "$systemdsystemunitdir/initrd.target.wants/$unit"

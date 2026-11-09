@@ -9,28 +9,23 @@
 # With the standby key set, the image is instead a standby root for the
 # successor to run the named services from before the takeover.
 #
-# --if-stale builds only when the image is missing or older than a file
-# it was built from.
+# --if-stale builds only when the image is missing or stale: built for
+# other settings, or older than a file it was built from. --check
+# prints why the image is stale and exits 1, or exits 0 when current.
 IMAGE=/var/lib/kmorph/successor.img
 MANIFEST="$IMAGE.files"
-CONF=/etc/kmorph/kmorph.conf
+STAMP="$IMAGE.stamp"
+CONF=${KMORPH_CONF:-/etc/kmorph/kmorph.conf}
+export KMORPH_CONF="$CONF"
 
 conf_key() {
 	[ -f "$CONF" ] && sed -n "s/^$1[[:space:]]*=[[:space:]]*//p" "$CONF" | tail -1 | tr ',' ' '
 }
 
-if [ "$1" = "--if-stale" ]; then
-	shift
-	if [ -f "$IMAGE" ]; then
-		[ -f "$MANIFEST" ] || exit 0
-		stale=
-		while read -r f; do
-			[ "$f" -nt "$IMAGE" ] && { stale=$f; break; }
-		done < "$MANIFEST"
-		[ -n "$stale" ] || exit 0
-		echo "kmorph-mkimage: $stale changed since the image was built"
-	fi
-fi
+mode=
+case "$1" in
+--if-stale|--check) mode=$1; shift ;;
+esac
 
 version="$1"
 if [ -z "$version" ]; then
@@ -40,6 +35,40 @@ if [ -z "$version" ]; then
 	esac
 fi
 [ -n "$version" ] || version=$(uname -r)
+standby=$(conf_key standby)
+
+# What the image depends on beyond the files it was built from.
+stamp() {
+	echo "kernel=$version"
+	echo "standby=$standby"
+	echo "standby_files=$(conf_key standby_files)"
+	echo "modules=$(conf_key modules)"
+}
+
+stale_reason() {
+	local key f
+
+	[ -f "$IMAGE" ] || { echo "not built yet"; return 0; }
+	[ -f "$STAMP" ] || { echo "built by an older kmorph"; return 0; }
+	key=$(stamp | grep -vxF -f "$STAMP" | head -1 | cut -d= -f1)
+	[ -n "$key" ] && { echo "$key changed since it was built"; return 0; }
+	[ -f "$MANIFEST" ] || return 1
+	while read -r f; do
+		[ "$f" -nt "$IMAGE" ] && { echo "$f changed since it was built"; return 0; }
+	done < "$MANIFEST"
+	return 1
+}
+
+case "$mode" in
+--check)
+	stale_reason && exit 1
+	exit 0
+	;;
+--if-stale)
+	reason=$(stale_reason) || exit 0
+	echo "kmorph-mkimage: rebuilding $IMAGE: $reason"
+	;;
+esac
 
 warn() { echo "kmorph-mkimage: $*" >&2; }
 
@@ -171,21 +200,23 @@ build_standby() {
 		return 1
 	mv "$IMAGE.tmp" "$IMAGE"
 	grep -v '^/var/' "$files" > "$MANIFEST"
+	stamp > "$STAMP"
 	echo "kmorph-mkimage: standby image $IMAGE ($(du -h "$tmp/initrd/standby.erofs" | cut -f1) root) for: $standby"
 }
 
 mkdir -p "$(dirname "$IMAGE")"
-standby=$(conf_key standby)
 if [ -n "$standby" ]; then
-	build_standby && exit 0
-	warn "building the image without standby services"
+	build_standby
+	exit
 fi
-rm -f "$MANIFEST"
+command -v kmorphd > "$MANIFEST.tmp"
 if command -v dracut >/dev/null 2>&1; then
-	exec dracut --force --add kmorph --kver "$version" "$IMAGE"
+	dracut --force --add kmorph --kver "$version" "$IMAGE"
 elif command -v mkinitramfs >/dev/null 2>&1; then
-	KMORPH_IMAGE=1 exec mkinitramfs -o "$IMAGE" "$version"
+	KMORPH_IMAGE=1 mkinitramfs -o "$IMAGE" "$version"
 else
 	echo "kmorph-mkimage: neither dracut nor mkinitramfs found" >&2
-	exit 1
-fi
+	false
+fi || { rm -f "$MANIFEST.tmp"; exit 1; }
+mv "$MANIFEST.tmp" "$MANIFEST"
+stamp > "$STAMP"
