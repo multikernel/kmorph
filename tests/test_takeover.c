@@ -120,7 +120,7 @@ static void fence_retries_are_bounded(void)
 	CHECK_STREQ(f.calls, "FFF");
 }
 
-static void alive_after_fence_failure_does_not_rearm(void)
+static void fence_failure_is_retried_while_alive(void)
 {
 	struct fake f = { .fence_fail_times = 1 };
 	struct takeover t;
@@ -128,7 +128,8 @@ static void alive_after_fence_failure_does_not_rearm(void)
 	takeover_init(&t, &ops, &f, 1, 2);
 	takeover_handle(&t, TK_EV_PROBE_SILENT);
 	takeover_handle(&t, TK_EV_PROBE_ALIVE);
-	CHECK_EQ(t.state, TK_FENCE_FAILED);
+	CHECK_EQ(t.state, TK_TAKEN_OVER);
+	CHECK_STREQ(f.calls, "FFAPR");
 }
 
 static void adopt_failure_resumes_from_fenced(void)
@@ -195,7 +196,7 @@ TEST_MAIN({
 	RUN(threshold_runs_the_whole_sequence);
 	RUN(fence_failure_is_retried_on_later_silence);
 	RUN(fence_retries_are_bounded);
-	RUN(alive_after_fence_failure_does_not_rearm);
+	RUN(fence_failure_is_retried_while_alive);
 	RUN(adopt_failure_resumes_from_fenced);
 	RUN(preserve_failure_keeps_memory_unreaped);
 	RUN(request_event_starts_takeover_directly);

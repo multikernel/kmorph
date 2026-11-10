@@ -76,8 +76,13 @@ void takeover_handle(struct takeover *t, enum takeover_event ev)
 		handle_watching(t, ev);
 		break;
 	case TK_FENCE_FAILED:
-		/* NMIs are idempotent, so a fence may be retried; a bounded number of times. */
-		if (ev != TK_EV_PROBE_ALIVE && t->fence_attempts <= t->fence_retries)
+		/*
+		 * NMIs are idempotent, so a fence may be retried; a bounded number
+		 * of times. A host that still answers is no reason to stop: a
+		 * failed fence has taken most of its CPUs, and the one left is
+		 * what answers.
+		 */
+		if (t->fence_attempts <= t->fence_retries)
 			begin_takeover(t);
 		break;
 	case TK_FENCED:
