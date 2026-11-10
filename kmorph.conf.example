@@ -75,7 +75,8 @@ memory  = 512MB
 #reset_devices = yes
 
 # Serial line that shows the successor's kernel messages, from its boot
-# through the takeover, e.g. ttyS0 or ttyAMA0.
+# through the takeover, e.g. ttyS0 or ttyAMA0, or tty0 for the screen,
+# such as the one a BMC's remote KVM shows.
 #console = ttyS0
 
 # Speed of that line.

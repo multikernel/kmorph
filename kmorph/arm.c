@@ -1,5 +1,6 @@
 #include <errno.h>
 #include <fcntl.h>
+#include <inttypes.h>
 #include <limits.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -23,6 +24,7 @@
 #include "kmorph/madt.h"
 #include "kmorph/memblock.h"
 #include "kmorph/netsnap.h"
+#include "kmorph/screen.h"
 #include "kmorph/uart.h"
 #include "kmorph/vmlinux.h"
 #include "arm.h"
@@ -397,7 +399,8 @@ static int build_host_tree(const struct kmorph_config *cfg, const struct arm_hoo
 }
 
 static int create_instance(const struct kmorph_config *cfg, const struct cpulist *machine,
-			   const char *name, const struct mkfs *fs, const struct arm_hooks *h)
+			   const char *name, const struct mkfs *fs, const struct arm_hooks *h,
+			   const struct screen *screen)
 {
 	struct strlist platform;
 	struct host_tree ht;
@@ -410,7 +413,7 @@ static int create_instance(const struct kmorph_config *cfg, const struct cpulist
 	if (ret)
 		return ret;
 	ret = dt_build_instance_create(name, &cfg->cpus, cfg->memory, &cfg->devices,
-				       &platform, &ht, &dtbo, &len);
+				       &platform, &ht, screen, &dtbo, &len);
 	host_tree_free(&ht);
 	if (ret)
 		return ret;
@@ -448,6 +451,29 @@ static bool has_early_console(const char *cmdline)
 	return false;
 }
 
+/* The successor draws the VT console on the screen the host's is seen on */
+static bool console_on_screen(const struct kmorph_config *cfg)
+{
+	return cfg->console && !strcmp(cfg->console, "tty0");
+}
+
+static int read_screen(const struct kmorph_config *cfg, const struct arm_hooks *h,
+		       struct screen *out)
+{
+	int ret = screen_read(h->class_root, out);
+
+	if (ret == -ENOENT)
+		log_err("%s has no framebuffer behind it", cfg->console);
+	else if (ret == -EOPNOTSUPP)
+		log_err("cannot tell where the display driver of %s keeps its picture", cfg->console);
+	else if (ret)
+		log_err("cannot read the framebuffer of %s: %s", cfg->console, strerror(-ret));
+	else
+		log_info("%s shows the successor's kernel messages on the %ux%u screen at 0x%" PRIx64,
+			 cfg->console, out->width, out->height, out->addr);
+	return ret;
+}
+
 /*
  * The earlycon that puts the successor's kernel messages on the console
  * line, or an empty one when the command line already has an early
@@ -464,6 +490,12 @@ static int console_earlycon(const struct kmorph_config *cfg, const struct arm_ho
 	out[0] = '\0';
 	if (!cfg->console)
 		return 0;
+	if (console_on_screen(cfg)) {
+		if (!cfg->console_login)
+			return 0;
+		log_err("a login needs a serial line; %s shows only kernel messages", cfg->console);
+		return -EOPNOTSUPP;
+	}
 	ret = uart_read(h->class_root, cfg->console, &u);
 	if (ret == -ENODEV) {
 		log_err("%s is a placeholder with no UART behind it", cfg->console);
@@ -563,6 +595,8 @@ static int successor_cmdline(const struct kmorph_config *cfg, const struct arm_h
 		if (!ret)
 			ret = cmdline_add(&line, "keep_bootcon");
 	}
+	if (!ret && console_on_screen(cfg))
+		ret = cmdline_add(&line, "console=tty0");
 	if (!ret && cfg->dump)
 		ret = cmdline_add(&line, DUMP_CMDLINE_PARAM);
 	*out = NULL;
@@ -759,6 +793,7 @@ int arm_run(const struct kmorph_config *cfg, const char *name, const struct mkfs
 {
 	struct kmorph_config resolved;
 	struct cpulist machine, cpus = { NULL, 0 };
+	struct screen screen, *shown = NULL;
 	struct strlist devices;
 	char earlycon[128];
 	uint32_t id;
@@ -773,6 +808,12 @@ int arm_run(const struct kmorph_config *cfg, const char *name, const struct mkfs
 		return ret;
 	if (*earlycon)
 		log_info("%s shows the successor's kernel messages through %s", cfg->console, earlycon);
+	if (console_on_screen(cfg)) {
+		ret = read_screen(cfg, h, &screen);
+		if (ret)
+			return ret;
+		shown = &screen;
+	}
 	ret = read_machine_cpus(h, &machine);
 	if (ret)
 		return ret;
@@ -797,7 +838,7 @@ int arm_run(const struct kmorph_config *cfg, const char *name, const struct mkfs
 		ret = initrd_fd;
 		goto out;
 	}
-	ret = create_instance(cfg, &machine, name, fs, h);
+	ret = create_instance(cfg, &machine, name, fs, h, shown);
 	if (ret)
 		goto out;
 	ret = mkfs_instance_id(fs, name, &id);

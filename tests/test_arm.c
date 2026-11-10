@@ -706,6 +706,70 @@ static void a_login_needs_an_8250_uart(void)
 	config_free(&cfg);
 }
 
+static void put_ast_screen(void)
+{
+	static const char resource[] = "0x0000000180000000 0x0000000181ffffff 0x0000000000140204\n";
+	char target[700], link[700];
+
+	mkdir_rel("class/graphics");
+	mkdir_rel("class/graphics/fb0");
+	put("class/graphics/fb0/virtual_size", "1024,768\n", 9);
+	put("class/graphics/fb0/bits_per_pixel", "32\n", 3);
+	put("class/graphics/fb0/stride", "4096\n", 5);
+	mkdir_rel("vga");
+	mkdir_rel("ast");
+	put("vga/resource", resource, sizeof(resource) - 1);
+	snprintf(target, sizeof(target), "%s/ast", sysfs);
+	snprintf(link, sizeof(link), "%s/vga/driver", sysfs);
+	unlink(link);
+	CHECK_EQ(symlink(target, link), 0);
+	snprintf(target, sizeof(target), "%s/vga", sysfs);
+	snprintf(link, sizeof(link), "%s/class/graphics/fb0/device", sysfs);
+	unlink(link);
+	CHECK_EQ(symlink(target, link), 0);
+}
+
+static void tty0_puts_kernel_messages_on_the_screen(void)
+{
+	struct mkfs fs = { sysfs };
+	int frag, ov, op, chosen, fb;
+	void *dtbo;
+	size_t len;
+
+	setup();
+	parse_config("cpus = 1\nmemory = 1GB\nkernel = /boot/vmlinuz\ncmdline = quiet\n"
+		     "console = tty0\n");
+	put_ast_screen();
+	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &hooks), 0);
+	CHECK_STREQ(calls.cmdline, "quiet console=tty0");
+	dtbo = read_blob("overlays/new", &len);
+	frag = fdt_path_offset(dtbo, "/fragment@0");
+	ov = fdt_subnode_offset(dtbo, frag, "__overlay__");
+	op = fdt_subnode_offset(dtbo, ov, "instance-create");
+	chosen = fdt_subnode_offset(dtbo, op, "chosen");
+	fb = fdt_subnode_offset(dtbo, chosen, "framebuffer");
+	CHECK(fb >= 0);
+	CHECK_EQ(fdt_test_get_u64(dtbo, fb, "reg", 0), 0x180000000ULL);
+	CHECK_EQ(fdt_test_get_u64(dtbo, fb, "reg", 1), 4096ULL * 768);
+	free(dtbo);
+	config_free(&cfg);
+}
+
+static void tty0_takes_no_login(void)
+{
+	struct mkfs fs = { sysfs };
+	char text[1024];
+
+	setup();
+	snprintf(text, sizeof(text), "cpus = 1\nmemory = 1GB\nkernel = /boot/vmlinuz\n"
+		 "console = tty0\nconsole_login = %s\n", login_path);
+	parse_config(text);
+	put_ast_screen();
+	CHECK_EQ(arm_run(&cfg, "generation-1", &fs, &hooks), -EOPNOTSUPP);
+	CHECK_STREQ(calls.seq, "");
+	config_free(&cfg);
+}
+
 static void a_successor_without_the_tty_hands_on_its_own_earlycon(void)
 {
 	static const char own[] = "root=/dev/vda earlycon=pl011,mmio32,0x9000000,115200 keep_bootcon\n";
@@ -1243,6 +1307,8 @@ TEST_MAIN({
 	RUN(an_early_console_in_cmdline_wins);
 	RUN(console_refuses_a_placeholder_port);
 	RUN(a_login_needs_an_8250_uart);
+	RUN(tty0_puts_kernel_messages_on_the_screen);
+	RUN(tty0_takes_no_login);
 	RUN(a_successor_without_the_tty_hands_on_its_own_earlycon);
 	RUN(arm_copies_its_own_cmdline_under_the_configured_one);
 	RUN(arm_refuses_cpus_outside_the_pool);

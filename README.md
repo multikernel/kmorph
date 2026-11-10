@@ -57,7 +57,9 @@ directly and needs no other tool.
 - In the successor kernel: the multikernel filesystem and the vsock
   transport, built in or as modules the successor image carries, and the
   serial driver for the [console](#successor-console) built in, since
-  earlycon comes up before any module.
+  earlycon comes up before any module; for `console = tty0`,
+  `CONFIG_DRM_SIMPLEDRM` and `CONFIG_FRAMEBUFFER_CONSOLE` built in, and a
+  multikernel kernel that takes a `framebuffer` node in instance-create.
 - On the predecessor: root, dracut or initramfs-tools for the successor
   image unless `initrd` names one, and `gzip`, `xz`, `zstd` or `lz4` if the
   kernel image is a compressed bzImage rather than an ELF vmlinux.
@@ -207,7 +209,7 @@ else has a default. `kmorph.conf.example` lists every key.
 | `modules` | | Kernel modules the distro image builders add to the successor image, comma separated: the vsock transport when it is a module, drivers for devices in `devices`. Ignored with `initrd`, whose image carries its own. |
 | `standby` | | systemd units the successor runs before the takeover, comma separated. See [Standby services](#standby-services). |
 | `standby_files` | | Further files or directories the standby image carries, such as plugins from a package other than the unit's. |
-| `console` | | Serial line that shows the successor's kernel messages, e.g. `ttyS0` or `ttyAMA0`. |
+| `console` | | Serial line that shows the successor's kernel messages, e.g. `ttyS0` or `ttyAMA0`, or `tty0` for the screen, see [Successor console](#successor-console). |
 | `console_baud` | `115200` | Speed of that line. |
 | `console_login` | | Program run on that line after the takeover; needs an 8250 UART. Unset: no login. The image must carry it; the one kmorph builds does. |
 
@@ -396,6 +398,19 @@ a driver or an interrupt. An early console already in `cmdline`, an
 UART has no driver, and so no tty, hands on the earlycon it booted with
 when it arms the next one. `kmorph arm` refuses a line with no UART
 behind it, such as an unused `ttyS` placeholder.
+
+When `console` is `tty0`, the successor draws its console on the screen
+this kernel's console is seen on, a BMC's remote KVM included. `kmorph arm`
+reads where the display controller scans its picture out from, and its
+size and layout, from `/sys/class/graphics/fb0`, and hands it to the
+successor as a `simple-framebuffer` node under `/chosen`, with
+`console=tty0` on its command line. The successor's own text console then
+writes to that memory with no driver for the display controller. Its
+messages appear once its framebuffer driver is up, a second or so into
+its boot, and both kernels draw on the screen until the takeover. kmorph
+places the picture of a screen a successor was itself handed this way
+and of the ASPEED BMC display (`ast`); for other display drivers
+`kmorph arm` refuses `tty0`. A screen takes no `console_login`.
 
 With `console_login` set as well, `kmorph arm` places the legacy serial
 device in the pool and hands it to the successor, whose kernel registers

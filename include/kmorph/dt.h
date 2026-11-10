@@ -9,6 +9,7 @@
 #include "kmorph/parse.h"
 #include "kmorph/pci.h"
 #include "kmorph/ranges.h"
+#include "kmorph/screen.h"
 
 /*
  * Blobs for the multikernel kernel interfaces. Every builder returns a
@@ -20,12 +21,14 @@
  * devices are PCI ids handed over by a second fragment; platform_devices
  * are platform device names listed in the instance's resources, which is
  * what lets the spawn register them. host_tree, when given, becomes the
- * multikernel,host-tree node of the instance's chosen node.
+ * multikernel,host-tree node of the instance's chosen node, and screen
+ * its framebuffer node.
  */
 int dt_build_instance_create(const char *name, const struct cpulist *cpus,
 			     uint64_t memory_bytes, const struct strlist *devices,
 			     const struct strlist *platform_devices,
 			     const struct host_tree *host_tree,
+			     const struct screen *screen,
 			     void **dtbo, size_t *len);
 
 /* A devices node of PCI functions, in the form the pool baseline uses. */

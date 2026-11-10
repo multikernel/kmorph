@@ -26,7 +26,8 @@ static void instance_create_carries_cpus_and_memory(void)
 	size_t len;
 	int op, res;
 
-	CHECK_EQ(dt_build_instance_create("successor", &cpus, 4ULL << 30, NULL, NULL, NULL, &dtbo, &len), 0);
+	CHECK_EQ(dt_build_instance_create("successor", &cpus, 4ULL << 30, NULL, NULL, NULL, NULL,
+					  &dtbo, &len), 0);
 	CHECK_EQ(fdtutil_check(dtbo, len), 0);
 	op = overlay_node(dtbo, "/instances", "instance-create");
 	CHECK(op >= 0);
@@ -49,7 +50,8 @@ static void instance_create_adds_devices_in_a_second_fragment(void)
 	size_t len;
 	int frag, ov, op, item;
 
-	CHECK_EQ(dt_build_instance_create("successor", &cpus, 1ULL << 30, &devices, NULL, NULL, &dtbo, &len), 0);
+	CHECK_EQ(dt_build_instance_create("successor", &cpus, 1ULL << 30, &devices, NULL, NULL, NULL,
+					  &dtbo, &len), 0);
 	CHECK_EQ(fdtutil_check(dtbo, len), 0);
 	frag = fdt_path_offset(dtbo, "/fragment@1");
 	CHECK(frag >= 0);
@@ -74,7 +76,7 @@ static void instance_create_lists_platform_devices_in_resources(void)
 	size_t len;
 	int op, res, devs, dev;
 
-	CHECK_EQ(dt_build_instance_create("successor", &cpus, 1ULL << 30, NULL, &platform, NULL,
+	CHECK_EQ(dt_build_instance_create("successor", &cpus, 1ULL << 30, NULL, &platform, NULL, NULL,
 					  &dtbo, &len), 0);
 	CHECK_EQ(fdtutil_check(dtbo, len), 0);
 	op = overlay_node(dtbo, "/instances", "instance-create");
@@ -98,7 +100,7 @@ static void instance_create_carries_the_host_tree_in_chosen(void)
 	int op, chosen, node, mem;
 
 	rangeset_add(&ht.ram, 0x100000, 0x7ff00000);
-	CHECK_EQ(dt_build_instance_create("successor", &cpus, 1ULL << 30, NULL, NULL, &ht,
+	CHECK_EQ(dt_build_instance_create("successor", &cpus, 1ULL << 30, NULL, NULL, &ht, NULL,
 					  &dtbo, &len), 0);
 	CHECK_EQ(fdtutil_check(dtbo, len), 0);
 	op = overlay_node(dtbo, "/instances", "instance-create");
@@ -113,10 +115,30 @@ static void instance_create_carries_the_host_tree_in_chosen(void)
 	free(dtbo);
 	rangeset_free(&ht.ram);
 
-	CHECK_EQ(dt_build_instance_create("successor", &cpus, 1ULL << 30, NULL, NULL, NULL,
+	CHECK_EQ(dt_build_instance_create("successor", &cpus, 1ULL << 30, NULL, NULL, NULL, NULL,
 					  &dtbo, &len), 0);
 	op = overlay_node(dtbo, "/instances", "instance-create");
 	CHECK(fdt_subnode_offset(dtbo, op, "chosen") < 0);
+	free(dtbo);
+}
+
+static void instance_create_carries_the_screen_in_chosen(void)
+{
+	struct screen screen = { 0x180000000ULL, 0x300000, 1024, 768, 4096, "x8r8g8b8" };
+	uint64_t ids[] = { 1 };
+	struct cpulist cpus = { ids, 1 };
+	void *dtbo;
+	size_t len;
+	int op, chosen, node;
+
+	CHECK_EQ(dt_build_instance_create("successor", &cpus, 1ULL << 30, NULL, NULL, NULL,
+					  &screen, &dtbo, &len), 0);
+	op = overlay_node(dtbo, "/instances", "instance-create");
+	chosen = fdt_subnode_offset(dtbo, op, "chosen");
+	CHECK(fdt_subnode_offset(dtbo, chosen, "multikernel,host-tree") < 0);
+	node = fdt_subnode_offset(dtbo, chosen, "framebuffer");
+	CHECK_EQ(fdt_node_check_compatible(dtbo, node, "simple-framebuffer"), 0);
+	CHECK_EQ(fdt_test_get_u64(dtbo, node, "reg", 0), 0x180000000ULL);
 	free(dtbo);
 }
 
@@ -467,6 +489,7 @@ TEST_MAIN({
 	RUN(instance_create_adds_devices_in_a_second_fragment);
 	RUN(instance_create_lists_platform_devices_in_resources);
 	RUN(instance_create_carries_the_host_tree_in_chosen);
+	RUN(instance_create_carries_the_screen_in_chosen);
 	RUN(instance_remove_names_the_instance);
 	RUN(adopt_lists_cpus_and_memory_by_reg);
 	RUN(adopt_omits_empty_operations);

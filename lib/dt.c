@@ -51,6 +51,7 @@ struct instance_args {
 	const struct strlist *devices;
 	const struct strlist *platform_devices;
 	const struct host_tree *host_tree;
+	const struct screen *screen;
 };
 
 static int emit_platform_device_nodes(void *fdt, const struct strlist *names);
@@ -94,11 +95,18 @@ static int build_instance_create(void *fdt, void *arg)
 	if (a->platform_devices && a->platform_devices->count)
 		TRY(emit_platform_devices(fdt, a->platform_devices));
 	TRY(fdt_end_node(fdt));	/* resources */
-	if (a->host_tree) {
+	if (a->host_tree || a->screen) {
 		TRY(fdt_begin_node(fdt, "chosen"));
-		TRY(fdt_begin_node(fdt, HOST_TREE_NODE));
-		TRY(host_tree_emit(fdt, a->host_tree));
-		TRY(fdt_end_node(fdt));
+		if (a->host_tree) {
+			TRY(fdt_begin_node(fdt, HOST_TREE_NODE));
+			TRY(host_tree_emit(fdt, a->host_tree));
+			TRY(fdt_end_node(fdt));
+		}
+		if (a->screen) {
+			TRY(fdt_begin_node(fdt, "framebuffer"));
+			TRY(screen_emit(fdt, a->screen));
+			TRY(fdt_end_node(fdt));
+		}
 		TRY(fdt_end_node(fdt));
 	}
 	TRY(fdt_end_node(fdt));	/* instance-create */
@@ -117,10 +125,11 @@ int dt_build_instance_create(const char *name, const struct cpulist *cpus,
 			     uint64_t memory_bytes, const struct strlist *devices,
 			     const struct strlist *platform_devices,
 			     const struct host_tree *host_tree,
+			     const struct screen *screen,
 			     void **dtbo, size_t *len)
 {
 	struct instance_args a = { name, cpus, memory_bytes, devices, platform_devices,
-				   host_tree };
+				   host_tree, screen };
 
 	if (!cpus->count || !memory_bytes)
 		return -EINVAL;
