@@ -22,6 +22,7 @@ struct kmorph_config {
 	struct strlist modules;	/* kernel modules the image builders add; unused by kmorph itself */
 	struct strlist standby;	/* units the successor runs before the takeover */
 	struct strlist standby_files;	/* extra paths the standby image builder copies */
+	bool network_root;	/* the image keeps dracut's networking for it; unused by kmorph itself */
 
 	/* Detection (successor side) */
 	uint64_t probe_interval_ms;

@@ -193,6 +193,19 @@ static void standby_lists_units_and_files(void)
 	config_free(&c);
 }
 
+static void network_root_defaults_to_no(void)
+{
+	struct kmorph_config c;
+	char err[128];
+
+	CHECK_EQ(config_parse("", &c, err, sizeof(err)), 0);
+	CHECK(!c.network_root);
+	config_free(&c);
+	CHECK_EQ(config_parse("network_root = yes\n", &c, err, sizeof(err)), 0);
+	CHECK(c.network_root);
+	config_free(&c);
+}
+
 static void reset_devices_defaults_to_yes(void)
 {
 	struct kmorph_config c;
@@ -221,5 +234,6 @@ TEST_MAIN({
 	RUN(cmdline_drop_is_a_list_of_names);
 	RUN(modules_is_a_list_for_the_image_builders);
 	RUN(standby_lists_units_and_files);
+	RUN(network_root_defaults_to_no);
 	RUN(reset_devices_defaults_to_yes);
 })

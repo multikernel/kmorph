@@ -138,8 +138,8 @@ The successor boots the distro's own initramfs with kmorphd inside, kept at
 `/var/lib/kmorph/successor.img`. There is no build step to run: `kmorph
 arm` builds it with dracut or mkinitramfs, whichever the host has, when it
 is missing or stale, that is when it was built for another kernel or other
-`modules`, `standby` or `standby_files`, or when kmorphd or another file it
-was built from has changed since. The config is appended at every arm, so
+`modules`, `standby`, `standby_files` or `network_root`, or when kmorphd or
+another file it was built from has changed since. The config is appended at every arm, so
 changing it never leaves the image stale.
 
 In the successor, the initramfs's init starts kmorphd and holds its boot on
@@ -209,6 +209,7 @@ else has a default. `kmorph.conf.example` lists every key.
 | `modules` | | Kernel modules the distro image builders add to the successor image, comma separated: the vsock transport when it is a module, drivers for devices in `devices`. Ignored with `initrd`, whose image carries its own. |
 | `standby` | | systemd units the successor runs before the takeover, comma separated. See [Standby services](#standby-services). |
 | `standby_files` | | Further files or directories the standby image carries, such as plugins from a package other than the unit's. |
+| `network_root` | `no` | `yes` when the root is on the network, so that the successor image keeps dracut's own networking to mount it. Otherwise kmorphd alone brings the network up until the disk's network manager takes it over. |
 | `console` | | Serial line that shows the successor's kernel messages, e.g. `ttyS0` or `ttyAMA0`, or `tty0` for the screen, see [Successor console](#successor-console). |
 | `console_baud` | `115200` | Speed of that line. |
 | `console_login` | | Program run on that line after the takeover; needs an 8250 UART. Unset: no login. The image must carry it; the one kmorph builds does. |

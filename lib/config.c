@@ -86,6 +86,8 @@ static int config_set(struct kmorph_config *c, const char *key, const char *valu
 		strlist_free(&c->standby_files);
 		return *value ? parse_strlist(value, &c->standby_files) : 0;
 	}
+	if (!strcmp(key, "network_root"))
+		return set_bool(&c->network_root, value);
 	if (!strcmp(key, "probe_interval"))
 		return parse_duration_ms(value, &c->probe_interval_ms);
 	if (!strcmp(key, "probe_timeouts"))

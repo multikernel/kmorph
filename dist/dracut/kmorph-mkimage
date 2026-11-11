@@ -43,6 +43,7 @@ stamp() {
 	echo "standby=$standby"
 	echo "standby_files=$(conf_key standby_files)"
 	echo "modules=$(conf_key modules)"
+	echo "network_root=$(conf_key network_root)"
 }
 
 stale_reason() {
@@ -209,9 +210,14 @@ if [ -n "$standby" ]; then
 	build_standby
 	exit
 fi
+# kmorphd brings the network up as the predecessor left it, and the
+# disk's network manager takes it over; dracut's would fight both.
+omit=(--omit "network systemd-networkd network-manager network-legacy")
+[ "$(conf_key network_root)" = yes ] && omit=()
+
 command -v kmorphd > "$MANIFEST.tmp"
 if command -v dracut >/dev/null 2>&1; then
-	dracut --force --add kmorph --kver "$version" "$IMAGE"
+	dracut --force --add kmorph "${omit[@]}" --kver "$version" "$IMAGE"
 elif command -v mkinitramfs >/dev/null 2>&1; then
 	KMORPH_IMAGE=1 mkinitramfs -o "$IMAGE" "$version"
 else

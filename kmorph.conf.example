@@ -55,6 +55,11 @@ memory  = 512MB
 # Further paths the standby image carries.
 #standby_files = /usr/lib64/nginx/modules
 
+# yes when the root is on the network, so that the successor image keeps
+# dracut's own networking to mount it. Otherwise kmorphd alone brings the network up until the disk's
+# network manager takes it over.
+#network_root = no
+
 # --- Detection and takeover (successor side, read by kmorphd) ---
 
 # How often the predecessor is probed.
