@@ -237,6 +237,42 @@ static void adopt_computes_takeable_and_aligns_to_blocks(void)
 	put(blocksize, "1000\n", 5);
 }
 
+static bool overlay_adds_cpu(const char *cpu)
+{
+	size_t len;
+	void *dtbo = read_blob("overlays/new", &len);
+	int frag = fdt_path_offset(dtbo, "/fragment@0");
+	int ov = fdt_subnode_offset(dtbo, frag, "__overlay__");
+	int op = fdt_subnode_offset(dtbo, ov, "cpu-add");
+	bool found = fdt_subnode_offset(dtbo, op, cpu) >= 0;
+
+	free(dtbo);
+	return found;
+}
+
+static void adopt_leaves_out_cpus_named_faulty(void)
+{
+	fdt64_t named[2] = { cpu_to_fdt64(1), cpu_to_fdt64(3) };
+	char path[1024];
+	struct ops o;
+
+	mkdir_rel(devtree, "chosen/multikernel,faults");
+	put_rel(devtree, "chosen/multikernel,faults/cpus", named, sizeof(named));
+
+	setup_env(NULL);
+	CHECK_EQ(ops_init(&o, &env), 0);
+	CHECK_EQ(ops_adopt(&o), 0);
+	CHECK_EQ(o.takeable.cpus.count, 2);
+	CHECK(overlay_adds_cpu("cpu@0"));
+	CHECK(!overlay_adds_cpu("cpu@1"));
+	CHECK(overlay_adds_cpu("cpu@2"));
+	CHECK(!overlay_adds_cpu("cpu@3"));
+	ops_free(&o);
+
+	snprintf(path, sizeof(path), "%s/chosen/multikernel,faults/cpus", devtree);
+	unlink(path);
+}
+
 static void adopt_aligns_to_the_memory_granule(void)
 {
 	void *tree = fdt_test_granule_tree(0x1000);
@@ -674,6 +710,7 @@ TEST_MAIN({
 	RUN(a_device_that_fails_does_not_stop_the_others);
 	RUN(adopt_takes_devices_once_before_cpus_and_memory);
 	RUN(reset_devices_resets_each_before_its_driver_probes);
+	RUN(adopt_leaves_out_cpus_named_faulty);
 	RUN(without_reset_drivers_bind_as_devices_join);
 	RUN(quiesced_devices_let_the_successor_claim_the_iommu);
 	RUN(the_host_keeps_the_iommu_while_a_device_is_not_adopted);

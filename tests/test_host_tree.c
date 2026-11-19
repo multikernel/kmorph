@@ -134,6 +134,25 @@ static void reads_cpus_ram_and_devices_back_from_a_directory(void)
 	host_tree_free(&ht);
 }
 
+static void reads_the_cpus_a_faults_node_names(void)
+{
+	fdt64_t cells[2] = { cpu_to_fdt64(3), cpu_to_fdt64(1) };
+	struct cpulist read;
+	char path[PATH_MAX];
+
+	mkdir_rel("faults");
+	put("faults/cpus", cells, sizeof(cells));
+	snprintf(path, sizeof(path), "%s/faults", dir);
+	CHECK_EQ(faults_read(path, &read), 0);
+	CHECK_EQ(read.count, 2);
+	CHECK_EQ(read.ids[0], 3);
+	CHECK_EQ(read.ids[1], 1);
+	cpulist_free(&read);
+
+	CHECK_EQ(faults_read("/nonexistent/faults", &read), 0);
+	CHECK_EQ(read.count, 0);
+}
+
 static void missing_directory_is_enoent(void)
 {
 	struct host_tree ht;
@@ -254,5 +273,6 @@ TEST_MAIN({
 	RUN(emits_the_vmcore_node_when_present);
 	RUN(omits_the_vmcore_node_when_absent);
 	RUN(reads_the_vmcore_node_back_from_a_directory);
+	RUN(reads_the_cpus_a_faults_node_names);
 	RUN(missing_directory_is_enoent);
 })

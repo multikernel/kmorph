@@ -221,6 +221,24 @@ static int read_devices(const char *dir, struct pci_list *out)
 	return ret;
 }
 
+int faults_read(const char *dir, struct cpulist *cpus)
+{
+	char path[PATH_MAX];
+	void *cells;
+	size_t len;
+	int ret;
+
+	cpus->ids = NULL;
+	cpus->count = 0;
+	snprintf(path, sizeof(path), "%s/cpus", dir);
+	ret = file_read(path, &cells, &len);
+	if (ret)
+		return ret == -ENOENT ? 0 : ret;
+	ret = fdtutil_cells_to_cpulist(cells, len, cpus);
+	free(cells);
+	return ret;
+}
+
 int host_tree_read(const char *dir, struct host_tree *ht)
 {
 	char path[PATH_MAX];

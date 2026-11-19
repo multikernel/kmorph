@@ -5,7 +5,7 @@
 #include "kmorph/takeable.h"
 
 static int cpulist_difference(const struct cpulist *all, const struct cpulist *minus,
-			      struct cpulist *out)
+			      const struct cpulist *faulty, struct cpulist *out)
 {
 	size_t i;
 
@@ -14,14 +14,15 @@ static int cpulist_difference(const struct cpulist *all, const struct cpulist *m
 		return -ENOMEM;
 	out->count = 0;
 	for (i = 0; i < all->count; i++)
-		if (!cpulist_has(minus, all->ids[i]) && !cpulist_has(out, all->ids[i]))
+		if (!cpulist_has(minus, all->ids[i]) && !cpulist_has(out, all->ids[i]) &&
+		    !(faulty && cpulist_has(faulty, all->ids[i])))
 			out->ids[out->count++] = all->ids[i];
 	return 0;
 }
 
 int takeable_compute(const struct host_tree *ht, const struct rangeset *own_ram,
 		     const struct rangeset *reserved, const struct cpulist *own_cpus,
-		     struct takeable *t)
+		     const struct cpulist *faulty, struct takeable *t)
 {
 	int ret;
 
@@ -32,8 +33,8 @@ int takeable_compute(const struct host_tree *ht, const struct rangeset *own_ram,
 	if (!ret)
 		ret = rangeset_subtract_set(&t->memory, reserved);
 	if (!ret)
-		ret = cpulist_difference(&ht->cpus, own_cpus, &t->cpus);
-	if (!ret && (!t->memory.count || !t->cpus.count))
+		ret = cpulist_difference(&ht->cpus, own_cpus, faulty, &t->cpus);
+	if (!ret && (!t->memory.count || (!t->cpus.count && !(faulty && faulty->count))))
 		ret = -ENOENT;
 	if (ret)
 		takeable_free(t);

@@ -29,11 +29,16 @@
  *           cpu-notes  { reg = <paddr size> ...; };   entry i: Linux CPU i
  *       };
  *   }
+ *
+ * A kernel that fences a predecessor shows the CPUs a fatal hardware
+ * error has condemned beside the host tree, as chosen/multikernel,faults
+ * with a cpus property of the same shape.
  */
 
 #define HOST_TREE_NODE "multikernel,host-tree"
 #define HOST_TREE_DIR DEVTREE_CHOSEN "/" HOST_TREE_NODE
 #define DEVTREE_CHOSEN "/proc/device-tree/chosen"
+#define FAULTS_NODE "multikernel,faults"
 
 struct host_tree {
 	struct cpulist cpus;
@@ -47,5 +52,8 @@ int host_tree_emit(void *fdt, const struct host_tree *ht);
 /* The node as /proc/device-tree exposes it: a directory of files. */
 int host_tree_read(const char *dir, struct host_tree *ht);
 void host_tree_free(struct host_tree *ht);
+
+/* The CPUs a faults node names; a missing node names none. */
+int faults_read(const char *dir, struct cpulist *cpus);
 
 #endif

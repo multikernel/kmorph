@@ -39,6 +39,7 @@ struct ops {
 	struct self_info self;
 	struct host_tree host;
 	struct rangelist iommus;	/* the host's VT-d units, claimed once its DMA is stopped */
+	struct cpulist faulty_cpus;	/* named in the kernel's faults node */
 	struct takeable takeable;
 	struct rangeset adoptable;	/* takeable memory the kernel can hot-add */
 	struct rangeset preserved;	/* adoptable memory left unclaimed for now */

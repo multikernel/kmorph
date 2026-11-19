@@ -505,6 +505,10 @@ upgrade writes no dump.
    are woken; memory is hot-added in units of the `memory-granule` the
    kernel publishes in its multikernel device tree, 4 MB on x86, or in
    whole memory blocks, 128 MB on x86, from a kernel that does not.
+   A predecessor killed by a hardware error may name what the error
+   condemns, which the successor's kernel then shows in its device tree as
+   `chosen/multikernel,faults`. CPUs named there stay parked and are not
+   claimed.
 7. **Dump and reclaim.** With `dump` set, memory is held back until it has
    been written to the dump file, then reclaimed.
 8. **Console.** With `console_login` set, the login program is started on

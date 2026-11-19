@@ -83,6 +83,7 @@ void ops_free(struct ops *o)
 	rangeset_free(&o->preserved);
 	rangeset_free(&o->adoptable);
 	takeable_free(&o->takeable);
+	cpulist_free(&o->faulty_cpus);
 	host_tree_free(&o->host);
 	self_info_free(&o->self);
 }
@@ -139,6 +140,34 @@ static int keep_for_pool(struct ops *o, uint64_t granule)
 	return rangeset_subtract(&o->adoptable, c->base, c->size);
 }
 
+/*
+ * The kernel shows what the predecessor's fatal hardware error condemns
+ * once the fence is done; a generation before may have handed more down
+ * in the host tree. Faulty hardware that cannot be read is adopted like
+ * the rest: a takeover never fails over it.
+ */
+static void read_faults(struct ops *o)
+{
+	char path[PATH_MAX], list[256] = "";
+	size_t i, n = 0;
+	int ret;
+
+	cpulist_free(&o->faulty_cpus);
+	snprintf(path, sizeof(path), "%s/chosen/%s", o->env.devtree_root, FAULTS_NODE);
+	ret = faults_read(path, &o->faulty_cpus);
+	if (ret) {
+		log_warn("cannot read the faulty hardware: %s; adopting everything",
+			 strerror(-ret));
+		cpulist_free(&o->faulty_cpus);
+		return;
+	}
+	for (i = 0; i < o->faulty_cpus.count && n < sizeof(list) - 24; i++)
+		n += snprintf(list + n, sizeof(list) - n, "%s%#llx", i ? ", " : "",
+			      (unsigned long long)o->faulty_cpus.ids[i]);
+	if (o->faulty_cpus.count)
+		log_warn("leaving out %zu CPUs named faulty: %s", o->faulty_cpus.count, list);
+}
+
 static int plan_adoption(struct ops *o)
 {
 	struct rangeset own_ram = RANGESET_INIT;
@@ -147,11 +176,12 @@ static int plan_adoption(struct ops *o)
 
 	takeable_free(&o->takeable);
 	rangeset_free(&o->adoptable);
+	read_faults(o);
 
 	ret = iomem_system_ram(o->env.iomem_path, &own_ram);
 	if (!ret)
 		ret = takeable_compute(&o->host, &own_ram, &o->self.reserved,
-				       &o->self.own_cpus, &o->takeable);
+				       &o->self.own_cpus, &o->faulty_cpus, &o->takeable);
 	rangeset_free(&own_ram);
 	if (ret) {
 		log_err("cannot compute the takeable resources: %s", strerror(-ret));
