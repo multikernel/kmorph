@@ -101,6 +101,10 @@ exec_paths() {
 	done
 }
 
+env_files() {
+	systemctl show -P EnvironmentFiles "$1" | sed 's/ (ignore_errors=[a-z]*)$//'
+}
+
 # Everything the packages of the unit and its main program ship: config,
 # data and plugins no library scan would find. Documentation is left out.
 package_files() {
@@ -153,6 +157,7 @@ build_standby() {
 			warn "$unit runs in a mount namespace of its own; it restarts at the takeover"
 		unit_files "$unit" >> "$files"
 		exec_paths "$unit" >> "$files"
+		env_files "$unit" >> "$files"
 		package_files "$unit" >> "$files"
 	done
 	for f in $(conf_key standby_files); do

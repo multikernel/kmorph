@@ -316,9 +316,9 @@ standby = nginx.service
 
 `kmorph arm` then builds a standby image: a standby root, built with
 dracut from the host's own files, holding systemd, each unit with its
-drop-ins, its programs and their libraries, everything the packages of the
-unit and its main program ship, `/etc`, and `standby_files`, packed as an
-EROFS image beside kmorphd.
+drop-ins and environment files, its programs and their libraries,
+everything the packages of the unit and its main program ship, `/etc`, and
+`standby_files`, packed as an EROFS image beside kmorphd.
 
 kmorphd, as the successor's init, mounts the image under a writable layer
 in memory, makes it the root, allows `ip_nonlocal_bind`, and forks: PID 1
