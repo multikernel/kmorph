@@ -106,7 +106,6 @@ static void instance_create_carries_the_host_tree_in_chosen(void)
 	op = overlay_node(dtbo, "/instances", "instance-create");
 	chosen = fdt_subnode_offset(dtbo, op, "chosen");
 	CHECK(chosen >= 0);
-	CHECK(fdt_first_property_offset(dtbo, chosen) < 0);
 	node = fdt_subnode_offset(dtbo, chosen, "multikernel,host-tree");
 	CHECK(node >= 0);
 	CHECK_EQ(fdt_test_get_u64(dtbo, node, "cpus", 3), 3);
@@ -118,7 +117,26 @@ static void instance_create_carries_the_host_tree_in_chosen(void)
 	CHECK_EQ(dt_build_instance_create("successor", &cpus, 1ULL << 30, NULL, NULL, NULL, NULL,
 					  &dtbo, &len), 0);
 	op = overlay_node(dtbo, "/instances", "instance-create");
-	CHECK(fdt_subnode_offset(dtbo, op, "chosen") < 0);
+	chosen = fdt_subnode_offset(dtbo, op, "chosen");
+	CHECK(fdt_subnode_offset(dtbo, chosen, "multikernel,host-tree") < 0);
+	free(dtbo);
+}
+
+static void instance_create_asks_for_a_message_ring(void)
+{
+	uint64_t ids[] = { 1 };
+	struct cpulist cpus = { ids, 1 };
+	void *dtbo;
+	size_t len;
+	int op, chosen, plen = -1;
+
+	CHECK_EQ(dt_build_instance_create("successor", &cpus, 1ULL << 30, NULL, NULL, NULL, NULL,
+					  &dtbo, &len), 0);
+	op = overlay_node(dtbo, "/instances", "instance-create");
+	chosen = fdt_subnode_offset(dtbo, op, "chosen");
+	CHECK(chosen >= 0);
+	CHECK(fdt_getprop(dtbo, chosen, "multikernel,ipi-buffer", &plen) != NULL);
+	CHECK_EQ(plen, 0);
 	free(dtbo);
 }
 
@@ -489,6 +507,7 @@ TEST_MAIN({
 	RUN(instance_create_adds_devices_in_a_second_fragment);
 	RUN(instance_create_lists_platform_devices_in_resources);
 	RUN(instance_create_carries_the_host_tree_in_chosen);
+	RUN(instance_create_asks_for_a_message_ring);
 	RUN(instance_create_carries_the_screen_in_chosen);
 	RUN(instance_remove_names_the_instance);
 	RUN(adopt_lists_cpus_and_memory_by_reg);

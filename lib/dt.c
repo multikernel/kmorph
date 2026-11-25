@@ -11,6 +11,7 @@
 #define INSTANCES_PATH "/instances"
 #define POOL_PATH "/resources"
 #define PCI_HOST_BRIDGE_COMPATIBLE "multikernel,pci-host-bridge"
+#define IPI_BUFFER_PROPERTY "multikernel,ipi-buffer"
 
 /* Run a sequence of libfdt calls, stopping at the first error. */
 #define TRY(expr) do { int _r = (expr); if (_r) return _r; } while (0)
@@ -95,20 +96,24 @@ static int build_instance_create(void *fdt, void *arg)
 	if (a->platform_devices && a->platform_devices->count)
 		TRY(emit_platform_devices(fdt, a->platform_devices));
 	TRY(fdt_end_node(fdt));	/* resources */
-	if (a->host_tree || a->screen) {
-		TRY(fdt_begin_node(fdt, "chosen"));
-		if (a->host_tree) {
-			TRY(fdt_begin_node(fdt, HOST_TREE_NODE));
-			TRY(host_tree_emit(fdt, a->host_tree));
-			TRY(fdt_end_node(fdt));
-		}
-		if (a->screen) {
-			TRY(fdt_begin_node(fdt, "framebuffer"));
-			TRY(screen_emit(fdt, a->screen));
-			TRY(fdt_end_node(fdt));
-		}
+	TRY(fdt_begin_node(fdt, "chosen"));
+	/*
+	 * The kernel gives an instance a message ring only when asked. The
+	 * probes, the devices lent to the successor and its halt notice
+	 * all travel over it.
+	 */
+	TRY(fdt_property(fdt, IPI_BUFFER_PROPERTY, NULL, 0));
+	if (a->host_tree) {
+		TRY(fdt_begin_node(fdt, HOST_TREE_NODE));
+		TRY(host_tree_emit(fdt, a->host_tree));
 		TRY(fdt_end_node(fdt));
 	}
+	if (a->screen) {
+		TRY(fdt_begin_node(fdt, "framebuffer"));
+		TRY(screen_emit(fdt, a->screen));
+		TRY(fdt_end_node(fdt));
+	}
+	TRY(fdt_end_node(fdt));	/* chosen */
 	TRY(fdt_end_node(fdt));	/* instance-create */
 	TRY(fragment_end(fdt));
 	/* Devices join by a second fragment against the instance the first one creates. */
