@@ -44,7 +44,7 @@ static int net_snapshot(const struct strlist *skip, char **text)
 const struct arm_hooks arm_default_hooks = {
 	.open_kernel = vmlinux_open,
 	.kexec_load = mksys_kexec_load,
-	.exec = mksys_exec,
+	.start = mksys_start,
 	.halt = mksys_halt,
 	.unload = mksys_kexec_unload,
 	.pci_root = PCI_SYSFS_ROOT,
@@ -712,7 +712,7 @@ out:
 static int load_and_exec(const struct kmorph_config *cfg, const struct arm_hooks *h, int id,
 			 int initrd_fd, const char *earlycon)
 {
-	int kernel_fd, ret;
+	int kernel_fd, mk_fd, ret;
 	char *cmdline;
 
 	kernel_fd = h->open_kernel(cfg->kernel);
@@ -729,17 +729,18 @@ static int load_and_exec(const struct kmorph_config *cfg, const struct arm_hooks
 	}
 	log_info("successor command line: %s", cmdline ? cmdline : "(empty)");
 
-	ret = h->kexec_load(kernel_fd, initrd_fd, cmdline, id);
+	mk_fd = h->kexec_load(kernel_fd, initrd_fd, cmdline, id);
 	close(kernel_fd);
 	free(cmdline);
-	if (ret) {
-		log_err("kexec_file_load failed: %s", strerror(-ret));
-		return ret;
+	if (mk_fd < 0) {
+		log_err("kexec_file_load failed: %s", strerror(-mk_fd));
+		return mk_fd;
 	}
 
-	ret = h->exec(id);
+	ret = h->start(mk_fd);
+	close(mk_fd);
 	if (ret)
-		log_err("exec of instance %d failed: %s", id, strerror(-ret));
+		log_err("start of instance %d failed: %s", id, strerror(-ret));
 	return ret;
 }
 

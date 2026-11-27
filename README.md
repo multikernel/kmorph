@@ -548,8 +548,8 @@ range, and every generation starts out as the first one did.
 
 Everything novel is in the kernel. kmorph is orchestration over the
 kernel's multikernel interfaces: the `/sys/fs/multikernel` filesystem for
-the pool and instances, `kexec_file_load()` and `reboot()` to load, boot,
-halt and fence, and vsock for liveness and requests.
+the pool and instances, `kexec_file_load()` and the instance descriptor it
+returns to load, boot, halt and fence, and vsock for liveness and requests.
 
 ### Arming
 
@@ -571,7 +571,8 @@ halt and fence, and vsock for liveness and requests.
    the initramfs for that instance. The initramfs is the image with the
    config and the network identity appended, assembled in memory; nothing
    on disk is changed.
-3. **Exec.** The multikernel `reboot()` command boots it. At that moment
+3. **Start.** `KEXEC_MK_IOC_START` on the instance descriptor that the
+   load returned boots it. At that moment
    the predecessor kernel writes the successor's boot device tree: the host
    tree goes into the successor's `/chosen` as it was given, and beside it
    the kernel adds what only it knows, the control regions the successor
@@ -603,10 +604,12 @@ owns, tracked by its own accounting, and everything else, which after the
 fence is one bag it absorbs regardless of how the predecessor had divided
 it.
 
-1. **Fence.** `reboot()` with the multikernel force-halt command and
-   `mk_id 0`. The successor kernel stops every CPU it does not own, by NMI and
-   INIT on x86 and by a stop IPI and PSCI on arm64, and confirms each
-   target stopped; it returns an error rather than a partial fence.
+1. **Fence.** `KEXEC_MK_IOC_HALT` with `KEXEC_MK_HALT_FORCE` on the
+   descriptor of instance 0, the predecessor. The kernel allows it only to
+   a spawn that was armed with a host tree. The successor kernel stops
+   every CPU it does not own, by NMI and INIT on x86 and by a stop IPI and
+   PSCI on arm64, and confirms each target stopped; it returns an error
+   rather than a partial fence.
 2. **Adopt.** kmorphd reads the host tree and the reserved regions back
    from its own `/proc/device-tree`, subtracts its own RAM from the
    machine's, subtracts the reserved regions and the next pool, rounds to

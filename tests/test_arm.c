@@ -1,4 +1,5 @@
 #include <elf.h>
+#include <fcntl.h>
 #include <stdlib.h>
 #include <sys/stat.h>
 #include <unistd.h>
@@ -21,7 +22,7 @@ static char own_host_tree[600], own_cmdline[600];
 
 struct calls {
 	char seq[32];
-	int loaded_id, exec_id, halt_id, unloaded_id;
+	int loaded_id, mk_fd, started_fd, halt_id, unloaded_id;
 	int kernel_fd, initrd_fd;
 	char cmdline[256];
 	unsigned char initrd[65536];
@@ -60,10 +61,11 @@ static int fake_kexec_load(int kernel_fd, int initrd_fd, const char *cmdline, in
 		calls.initrd_len = n > 0 ? (size_t)n : 0;
 	}
 	snprintf(calls.cmdline, sizeof(calls.cmdline), "%s", cmdline ? cmdline : "");
-	return 0;
+	calls.mk_fd = open("/dev/null", O_RDONLY);
+	return calls.mk_fd;
 }
 
-static int fake_exec(int mk_id) { record('E'); calls.exec_id = mk_id; return 0; }
+static int fake_start(int fd) { record('E'); calls.started_fd = fd; return 0; }
 static int fake_halt(int mk_id) { record('H'); calls.halt_id = mk_id; return 0; }
 static int fake_unload(int mk_id) { record('U'); calls.unloaded_id = mk_id; return 0; }
 
@@ -75,7 +77,7 @@ static int fake_load_image(void **image, size_t *len)
 static const struct arm_hooks hooks = {
 	.open_kernel = fake_open_kernel,
 	.kexec_load = fake_kexec_load,
-	.exec = fake_exec,
+	.start = fake_start,
 	.halt = fake_halt,
 	.unload = fake_unload,
 	.pci_root = pci_root,
@@ -260,7 +262,7 @@ static void arm_creates_loads_and_execs(void)
 		CHECK(memcmp(e.data, cfg.text, e.len) == 0);
 	}
 	CHECK_EQ(calls.loaded_id, 5);
-	CHECK_EQ(calls.exec_id, 5);
+	CHECK_EQ(calls.started_fd, calls.mk_fd);
 	CHECK_STREQ(calls.cmdline, "quiet");
 
 	dtbo = read_blob("overlays/new", &len);

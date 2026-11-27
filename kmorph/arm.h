@@ -12,8 +12,9 @@
 /* The syscalls and paths arming needs, injectable for tests. */
 struct arm_hooks {
 	int (*open_kernel)(const char *path);
+	/* Returns the instance's descriptor, which start takes. */
 	int (*kexec_load)(int kernel_fd, int initrd_fd, const char *cmdline, int mk_id);
-	int (*exec)(int mk_id);
+	int (*start)(int fd);
 	int (*halt)(int mk_id);
 	int (*unload)(int mk_id);
 	const char *pci_root;		/* /sys/bus/pci/devices */
